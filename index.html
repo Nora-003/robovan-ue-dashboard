@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
 <title>Robovan UE 交互模型（三模式对比）</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/react@18.2.0/umd/react.development.js" crossorigin></script>
@@ -26,7 +28,16 @@
 
   /** 访问口令的 SHA-256（hex），原文勿写入仓库；轮换口令时重算并替换此常量 */
   const ACCESS_HASH_HEX = "4e846d293248b6cc0d9e2c7f6371442ef0057430eddbbf5e206916db6ed985e4";
-  const SESSION_KEY = "robovan-ue-auth-v1";
+  /** 含路径与版本，避免与 github.io 其他项目冲突；升级版本可一次性清空旧会话 */
+  const SESSION_KEY = "robovan-ue-auth-v2:" + (typeof location !== "undefined" ? (location.pathname.replace(/\/+$/, "") || "/") : "/");
+
+  function readSessionAuthed() {
+    try {
+      return sessionStorage.getItem(SESSION_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
 
   async function sha256Hex(text) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -44,7 +55,9 @@
       try {
         const hex = await sha256Hex(pwd.trim());
         if (hex === ACCESS_HASH_HEX) {
-          sessionStorage.setItem(SESSION_KEY, "1");
+          try {
+            sessionStorage.setItem(SESSION_KEY, "1");
+          } catch (_) { /* 私密模式等无法写入时仍允许本次会话进入 */ }
           onSuccess();
         } else {
           setErr("密码不正确");
@@ -83,9 +96,11 @@
   }
 
   function Root() {
-    const [authed, setAuthed] = useState(() => sessionStorage.getItem(SESSION_KEY) === "1");
+    const [authed, setAuthed] = useState(readSessionAuthed);
     const handleLogout = () => {
-      sessionStorage.removeItem(SESSION_KEY);
+      try {
+        sessionStorage.removeItem(SESSION_KEY);
+      } catch (_) {}
       setAuthed(false);
     };
     if (!authed) return <LoginGate onSuccess={() => setAuthed(true)} />;
