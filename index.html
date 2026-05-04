@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robovan UE 交互模型（三模式对比）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18.2.0/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://unpkg.com/recharts@2.10.3/umd/Recharts.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.23.2/babel.min.js"></script>
+<style>
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+  .disabled-input { background: #f3f4f6 !important; color: #9ca3af !important; cursor: not-allowed; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+<div id="root"></div>
+<script type="text/babel">
+  const { useState, useMemo, useEffect } = React;
+  const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, ComposedChart, Cell, AreaChart, Area } = Recharts;
+
+  const MONTHS = ["5月","6月","7月","8月","9月","10月","11月","12月"];
+
+  const defaultParams = {
+    vehicles: [100, 200, 300, 400, 500, 800, 1000, 2300],
+    saleDeliveries: [100, 50, 50, 50, 50, 500, 700, 800],
+    hardwareCost: [103165, 103165, 78535, 78535, 78535, 65000, 65000, 65000],
+    remoteRatio: [1, 2, 3, 4, 5, 8, 10, 13],
+    mpir: [17, 20, 25, 25, 25, 30, 40, 50],
+    accidents: [4, 4, 3, 3, 2, 1, 1, 1],
+    energy: [0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.28, 0.15],
+    trafficCost: [240, 240, 240, 240, 240, 100, 100, 100],
+    mappingCost: [621, 500, 150, 150, 150, 50, 50, 50],
+    platformRevenue: 3000,
+    leaseRevenue: 2500,
+    salePrice: 139800,
+    provisionRate: 0.30,
+    irr: 0.06,
+    depreciationRate: 0.95,
+    depreciationYears: 5,
+    remoteCost: 9500,
+    shiftRedundancy: 0.1,
+    csRatio: 100,
+    csCost: 5000,
+    groundRatio: 50,
+    groundCost: 5000,
+    insurance: 50,
+    workOrderDuration: 60,
+    streamBandwidth: 0.02,
+    bandwidthCostPerG: 40000,
+    bandwidthConsumption: 0.00125,
+    egressCost: 0.4,
+    orderMileage: 25,
+    emptyMileage: 75,
+    electricityPrice: 1,
+    backupPrice: 10,
+    compensation: 2500,
+    riskProb: 1,
+    faults: 1,
+    repairHours: 12,
+    laborCost: 80,
+    warehouse: 50,
+    routeDeploy: 140,
+    maintenance: 0,
+  };
+
+  function computePlatform(p) {
+    return MONTHS.map((_, i) => {
+      const v = p.vehicles[i], hw = p.hardwareCost[i], rr = p.remoteRatio[i];
+      const unitLease = hw * (1 + p.irr) / 5 / 12;
+      const remote = p.remoteCost / rr * (1 + p.shiftRedundancy);
+      const cs = p.csCost / p.csRatio * (1 + p.shiftRedundancy);
+      const ground = p.groundCost / p.groundRatio * (1 + p.shiftRedundancy);
+      const monthlyAccidents = v / 100 * p.accidents[i];
+      const riskTotal = p.compensation * monthlyAccidents * p.riskProb;
+      const riskPv = v > 0 ? riskTotal / v : 0;
+      const dailyOrders = (p.orderMileage + p.emptyMileage) / p.mpir[i];
+      const bwPv = p.streamBandwidth * p.bandwidthCostPerG / rr;
+      const cloudPv = dailyOrders * p.workOrderDuration * p.bandwidthConsumption * p.egressCost * 30 + bwPv;
+      const backup = p.backupPrice * p.orderMileage * p.accidents[i] / 100;
+      const repair = p.faults * p.repairHours * p.laborCost / 100;
+      const charging = p.emptyMileage * p.energy[i] * p.electricityPrice * 30;
+      const variable = charging + remote + cs + p.insurance + riskPv + p.trafficCost[i] + cloudPv + backup + repair + p.mappingCost[i];
+      const fixed = p.warehouse + ground + p.routeDeploy + p.maintenance;
+      const operating = variable + fixed;
+      const total = operating + unitLease;
+      const revenue = p.platformRevenue;
+      const gp = revenue - total;
+      return { month: MONTHS[i], vehicleCount: v, revenue, unitLease, charging, remote, cs, insurance: p.insurance, risk: riskPv, traffic: p.trafficCost[i], cloud: cloudPv, backup, repair, mapping: p.mappingCost[i], variableCost: variable, warehouse: p.warehouse, ground, routeDeploy: p.routeDeploy, maintenance: p.maintenance, fixedCost: fixed, operatingCost: operating, totalCost: total, grossProfit: gp, grossMargin: revenue > 0 ? (gp / revenue) * 100 : 0, revenueTotal: revenue * v, costTotal: total * v, grossProfitTotal: gp * v };
+    });
+  }
+
+  function computeLease(p) {
+    return MONTHS.map((_, i) => {
+      const v = p.vehicles[i], hw = p.hardwareCost[i], rr = p.remoteRatio[i];
+      const unitDep = hw * p.depreciationRate / p.depreciationYears / 12;
+      const remote = p.remoteCost / rr * (1 + p.shiftRedundancy);
+      const cs = p.csCost / p.csRatio * (1 + p.shiftRedundancy);
+      const ground = p.groundCost / p.groundRatio * (1 + p.shiftRedundancy);
+      const monthlyAccidents = v / 100 * p.accidents[i];
+      const riskTotal = p.compensation * monthlyAccidents * p.riskProb;
+      const riskPv = v > 0 ? riskTotal / v : 0;
+      const dailyOrders = (p.orderMileage + p.emptyMileage) / p.mpir[i];
+      const bwPv = p.streamBandwidth * p.bandwidthCostPerG / rr;
+      const cloudPv = dailyOrders * p.workOrderDuration * p.bandwidthConsumption * p.egressCost * 30 + bwPv;
+      const backup = p.backupPrice * p.orderMileage * p.accidents[i] / 100;
+      const repair = p.faults * p.repairHours * p.laborCost / 100;
+      const variable = remote + cs + p.insurance + riskPv + p.trafficCost[i] + cloudPv + backup + repair + p.mappingCost[i];
+      const fixed = ground + p.routeDeploy + p.maintenance;
+      const operating = variable + fixed;
+      const total = operating + unitDep;
+      const revenue = p.leaseRevenue;
+      const gp = revenue - total;
+      return { month: MONTHS[i], vehicleCount: v, revenue, unitLease: unitDep, charging: 0, remote, cs, insurance: p.insurance, risk: riskPv, traffic: p.trafficCost[i], cloud: cloudPv, backup, repair, mapping: p.mappingCost[i], variableCost: variable, warehouse: 0, ground, routeDeploy: p.routeDeploy, maintenance: p.maintenance, fixedCost: fixed, operatingCost: operating, totalCost: total, grossProfit: gp, grossMargin: revenue > 0 ? (gp / revenue) * 100 : 0, revenueTotal: revenue * v, costTotal: total * v, grossProfitTotal: gp * v };
+    });
+  }
+
+  function computeSale(p) {
+    const monthlyOp = MONTHS.map((_, i) => {
+      const cumulative = p.saleDeliveries.slice(0, i + 1).reduce((a, b) => a + b, 0);
+      const rr = p.remoteRatio[i];
+      const remote = p.remoteCost / rr * (1 + p.shiftRedundancy);
+      const cs = p.csCost / p.csRatio * (1 + p.shiftRedundancy);
+      const ground = p.groundCost / p.groundRatio * (1 + p.shiftRedundancy);
+      const monthlyAccidents = cumulative / 100 * p.accidents[i];
+      const riskTotal = p.compensation * monthlyAccidents * p.riskProb;
+      const riskPv = cumulative > 0 ? riskTotal / cumulative : 0;
+      const dailyOrders = (p.orderMileage + p.emptyMileage) / p.mpir[i];
+      const bwPv = p.streamBandwidth * p.bandwidthCostPerG / rr;
+      const cloudPv = dailyOrders * p.workOrderDuration * p.bandwidthConsumption * p.egressCost * 30 + bwPv;
+      const backup = p.backupPrice * p.orderMileage * p.accidents[i] / 100;
+      const repair = p.faults * p.repairHours * p.laborCost / 100;
+      const variable = remote + cs + p.insurance + riskPv + p.trafficCost[i] + cloudPv + backup + repair + p.mappingCost[i];
+      const fixed = ground + p.routeDeploy + p.maintenance;
+      return variable + fixed;
+    });
+    const suffix = []; let s = 0;
+    for (let i = 7; i >= 0; i--) { s += monthlyOp[i]; suffix[i] = s; }
+    return MONTHS.map((_, i) => {
+      const deliveries = p.saleDeliveries[i];
+      const hw = p.hardwareCost[i];
+      const provision = p.salePrice * p.provisionRate;
+      const cumOp = suffix[i];
+      const costPerVehicle = hw + Math.max(cumOp, provision);
+      const revenue = p.salePrice;
+      const gp = revenue - costPerVehicle;
+      return { month: MONTHS[i], vehicleCount: deliveries, cumulative: p.saleDeliveries.slice(0, i + 1).reduce((a, b) => a + b, 0), revenue, unitLease: 0, charging: 0, remote: 0, cs: 0, insurance: 0, risk: 0, traffic: 0, cloud: 0, backup: 0, repair: 0, mapping: 0, variableCost: 0, warehouse: 0, ground: 0, routeDeploy: 0, maintenance: 0, fixedCost: 0, operatingCost: cumOp, totalCost: costPerVehicle, grossProfit: gp, grossMargin: revenue > 0 ? (gp / revenue) * 100 : 0, revenueTotal: revenue * deliveries, costTotal: costPerVehicle * deliveries, grossProfitTotal: gp * deliveries, provision, hardwareCost: hw };
+    });
+  }
+
+  function computeSensitivity(params, mode, monthIndex) {
+    const baseFn = mode === "platform" ? computePlatform : mode === "lease" ? computeLease : computeSale;
+    const base = baseFn(params)[monthIndex].grossProfit;
+    const tests = [
+      { key: mode === "platform" ? "platformRevenue" : mode === "lease" ? "leaseRevenue" : "salePrice", label: "单车收入/售价", step: 0.1 },
+      { key: "hardwareCost", label: "硬件成本", step: 0.1, array: true },
+      { key: "remoteCost", label: "远驾安全员成本", step: 0.1 },
+      { key: "remoteRatio", label: "远驾人车比", step: 0.1, array: true, inverse: true },
+      { key: "shiftRedundancy", label: "排班冗余", step: 0.1 },
+      { key: "accidents", label: "百台车月事故次数", step: 0.1, array: true },
+      { key: "compensation", label: "单次赔偿金额", step: 0.1 },
+      { key: "mappingCost", label: "采图制图", step: 0.1, array: true },
+    ];
+    if (mode === "platform") tests.push({ key: "irr", label: "IRR", step: 0.1 }, { key: "energy", label: "能耗", step: 0.1, array: true });
+    if (mode === "lease") tests.push({ key: "depreciationRate", label: "折旧残值率", step: 0.1 });
+    if (mode === "sale") tests.push({ key: "provisionRate", label: "预计负债比例", step: 0.1 });
+    return tests.map((t) => {
+      const run = (mult) => {
+        const clone = JSON.parse(JSON.stringify(params));
+        if (t.array) clone[t.key] = clone[t.key].map((v) => v * mult);
+        else clone[t.key] = clone[t.key] * mult;
+        return baseFn(clone)[monthIndex].grossProfit;
+      };
+      return { label: t.label, up: run(1 + t.step) - base, down: run(1 - t.step) - base, base };
+    });
+  }
+
+  function CustomBarChart({ data, bars, height = 300, symmetric = true, yFormat = (v) => (v/10000).toFixed(0), tooltipFormat = formatWan }) {
+    const allValues = data.flatMap(d => bars.map(b => d[b.key]));
+    const minVal = Math.min(...allValues);
+    const maxVal = Math.max(...allValues);
+    const maxAbs = Math.max(Math.abs(minVal), Math.abs(maxVal), 1);
+    const digits = Math.pow(10, Math.floor(Math.log10(maxAbs)));
+    const maxTick = Math.max(Math.ceil(maxAbs / digits) * digits, digits);
+
+    let rangeMin, rangeMax, zeroPct, tickCount, step;
+    if (symmetric) {
+      rangeMin = -maxTick; rangeMax = maxTick;
+      zeroPct = 50;
+      tickCount = 9; step = maxTick / 4;
+    } else {
+      const allNonNeg = minVal >= 0;
+      const allNonPos = maxVal <= 0;
+      if (allNonNeg) {
+        rangeMin = 0; rangeMax = maxTick;
+        zeroPct = 100;
+      } else if (allNonPos) {
+        rangeMin = -maxTick; rangeMax = 0;
+        zeroPct = 0;
+      } else {
+        rangeMin = -maxTick; rangeMax = maxTick;
+        zeroPct = (maxTick / (maxTick * 2)) * 100;
+      }
+      tickCount = 6; step = maxTick / 5;
+    }
+
+    const ticks = Array.from({ length: tickCount }).map((_, i) => rangeMax - i * step);
+
+    return (
+      <div style={{ height, position: 'relative', paddingLeft: 52, paddingBottom: 32 }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 32, width: 48, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 11, color: '#64748b', textAlign: 'right' }}>
+          {ticks.map((val, i) => <span key={i}>{yFormat(val)}</span>)}
+        </div>
+        <div style={{ position: 'relative', height: 'calc(100% - 32px)' }}>
+          {ticks.map((_, i) => (
+            <div key={i} style={{ position: 'absolute', left: 0, right: 0, top: `${(i / (tickCount - 1)) * 100}%`, borderTop: (symmetric && i === Math.floor((tickCount - 1) / 2)) || (!symmetric && ((zeroPct === 100 && i === tickCount - 1) || (zeroPct === 0 && i === 0) || (zeroPct > 0 && zeroPct < 100 && Math.abs(i / (tickCount - 1) * 100 - zeroPct) < 2))) ? '1px solid #94a3b8' : '1px dashed #e2e8f0', zIndex: 1 }} />
+          ))}
+          <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'stretch', height: '100%', position: 'relative', zIndex: 2 }}>
+            {data.map((d, i) => (
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3, height: '100%', position: 'relative' }}>
+                  {bars.map(b => {
+                    const val = d[b.key];
+                    const isNeg = val < 0;
+                    const pct = symmetric
+                      ? (Math.abs(val) / (maxTick * 2)) * 100
+                      : (Math.abs(val) / (rangeMax - rangeMin)) * 100;
+                    const bottomPos = symmetric ? '50%' : `${100 - zeroPct}%`;
+                    const topPos = symmetric ? '50%' : `${zeroPct}%`;
+                    const barColor = d.color || b.color;
+                    return (
+                      <div key={b.key} title={`${b.name}: ${tooltipFormat(val)}`} style={{ position: 'relative', width: 28, height: '100%' }}>
+                        <div style={{ position: 'absolute', left: 0, right: 0, [isNeg ? 'top' : 'bottom']: symmetric ? '50%' : (isNeg ? topPos : bottomPos), height: `${pct}%`, backgroundColor: barColor, borderRadius: isNeg ? '0 0 3px 3px' : '3px 3px 0 0' }} />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: '#475569', marginTop: 6, height: 20, whiteSpace: 'nowrap' }}>{d.name || d.month}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, paddingTop: 8, fontSize: 12 }}>
+          {bars.map(b => (
+            <span key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 12, height: 12, backgroundColor: b.color, borderRadius: 2, display: 'inline-block' }} />
+              {b.name}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function formatNum(n) { return n === undefined || n === null ? "-" : n.toLocaleString("zh-CN", { maximumFractionDigits: 1 }); }
+  function formatWan(n) { return (n / 10000).toFixed(2) + "万"; }
+
+  function InputGroup({ title, gid, collapsed, onToggle, children }) {
+    return (
+      <div className="mb-4 border-b border-gray-100 pb-3">
+        <button onClick={() => onToggle(gid)} className="flex items-center justify-between w-full text-sm font-semibold text-gray-700 mb-2 hover:text-gray-900">
+          <span>{title}</span><span className="text-gray-400 text-xs">{collapsed ? "展开" : "收起"}</span>
+        </button>
+        {!collapsed && <div className="space-y-2">{children}</div>}
+      </div>
+    );
+  }
+
+  function NumInput({ label, value, onChange, step = 1, disabled = false }) {
+    return (
+      <div className="flex items-center justify-between">
+        <label className={`text-xs ${disabled ? "text-gray-400" : "text-gray-600"}`}>{label}</label>
+        <input type="number" value={disabled ? 0 : value} onChange={(e) => onChange(e.target.value)} step={step} disabled={disabled}
+          className={`w-24 text-right text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 ${disabled ? "disabled-input" : "border-gray-200 bg-white"}`} />
+      </div>
+    );
+  }
+
+  function MonthInput({ label, values, onChange, step = 1, disabled = false }) {
+    return (
+      <div className={`mb-2 ${disabled ? "opacity-50" : ""}`}>
+        <div className={`text-xs mb-1 ${disabled ? "text-gray-400" : "text-gray-600"}`}>{label}</div>
+        <div className="grid grid-cols-4 gap-2">
+          {MONTHS.map((m, i) => (
+            <div key={m}>
+              <div className="text-[10px] text-gray-400 text-center mb-0.5">{m}</div>
+              <input type="number" value={disabled ? 0 : values[i]} onChange={(e) => onChange(i, e.target.value)} step={step}
+                disabled={disabled} className={`w-full text-xs border rounded px-1 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500 ${disabled ? "disabled-input" : "border-gray-200 bg-white"}`} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function App() {
+    const [params, setParams] = useState(defaultParams);
+    const [mode, setMode] = useState("platform"); // platform | lease | sale
+    const [activeTab, setActiveTab] = useState("monthly"); // monthly | annual
+    const [selectedMonth, setSelectedMonth] = useState(7);
+    const [viewMode, setViewMode] = useState("perVehicle");
+    const [collapsedGroups, setCollapsedGroups] = useState({});
+
+    useEffect(() => {
+      const hash = window.location.hash;
+      if (hash.includes('mode=')) {
+        const m = hash.match(/mode=(\w+)/);
+        if (m && ['platform','lease','sale'].includes(m[1])) setMode(m[1]);
+      }
+      if (hash.includes('tab=')) {
+        const t = hash.match(/tab=(\w+)/);
+        if (t && ['monthly','annual'].includes(t[1])) setActiveTab(t[1]);
+      }
+    }, []);
+
+    const allData = useMemo(() => {
+      if (mode === "platform") return computePlatform(params);
+      if (mode === "lease") return computeLease(params);
+      return computeSale(params);
+    }, [mode, params]);
+
+    const current = allData[selectedMonth];
+    const sens = useMemo(() => computeSensitivity(params, mode, selectedMonth), [params, mode, selectedMonth]);
+
+    const annualPlatform = useMemo(() => computePlatform(params), [params]);
+    const annualLease = useMemo(() => computeLease(params), [params]);
+    const annualSale = useMemo(() => computeSale(params), [params]);
+
+    const annualSummary = useMemo(() => {
+      const calc = (data) => ({
+        revenue: data.reduce((s, d) => s + d.revenueTotal, 0),
+        cost: data.reduce((s, d) => s + d.costTotal, 0),
+        gp: data.reduce((s, d) => s + d.grossProfitTotal, 0),
+      });
+      const p = calc(annualPlatform), l = calc(annualLease), s = calc(annualSale);
+      return [
+        { name: "平台模式", revenue: p.revenue, cost: p.cost, gp: p.gp, gm: p.revenue > 0 ? (p.gp / p.revenue) * 100 : 0, color: "#3b82f6" },
+        { name: "租赁模式", revenue: l.revenue, cost: l.cost, gp: l.gp, gm: l.revenue > 0 ? (l.gp / l.revenue) * 100 : 0, color: "#8b5cf6" },
+        { name: "卖车模式", revenue: s.revenue, cost: s.cost, gp: s.gp, gm: s.revenue > 0 ? (s.gp / s.revenue) * 100 : 0, color: "#f59e0b" },
+      ];
+    }, [annualPlatform, annualLease, annualSale]);
+
+    const annualChartData = useMemo(() => {
+      return MONTHS.map((m, i) => ({
+        month: m,
+        平台收入: Math.round(annualPlatform[i].revenueTotal / 10000),
+        平台成本: Math.round(annualPlatform[i].costTotal / 10000),
+        平台毛利: Math.round(annualPlatform[i].grossProfitTotal / 10000),
+        租赁收入: Math.round(annualLease[i].revenueTotal / 10000),
+        租赁成本: Math.round(annualLease[i].costTotal / 10000),
+        租赁毛利: Math.round(annualLease[i].grossProfitTotal / 10000),
+        卖车收入: Math.round(annualSale[i].revenueTotal / 10000),
+        卖车成本: Math.round(annualSale[i].costTotal / 10000),
+        卖车毛利: Math.round(annualSale[i].grossProfitTotal / 10000),
+      }));
+    }, [annualPlatform, annualLease, annualSale]);
+
+    const updateParam = (key, value) => setParams((p) => ({ ...p, [key]: parseFloat(value) || 0 }));
+    const updateArrayParam = (key, index, value) => setParams((p) => { const arr = [...p[key]]; arr[index] = parseFloat(value) || 0; return { ...p, [key]: arr }; });
+    const toggleGroup = (key) => setCollapsedGroups((g) => ({ ...g, [key]: !g[key] }));
+
+    const isPlatform = mode === "platform";
+    const isLease = mode === "lease";
+    const isSale = mode === "sale";
+
+    const chartData = allData.map((d) => ({
+      month: d.month, 车辆数: d.vehicleCount,
+      租赁成本: Math.round(d.unitLease), 远驾安全员: Math.round(d.remote), 充电: Math.round(d.charging),
+      云服务: Math.round(d.cloud), 客服地勤保险: Math.round(d.cs + d.ground + d.insurance),
+      风险维修补充: Math.round(d.risk + d.repair + d.backup), 其他费用: Math.round(d.traffic + d.mapping + d.warehouse + d.routeDeploy + d.maintenance),
+      单车收入: Math.round(d.revenue), 单车成本: Math.round(d.totalCost), 单车毛利: Math.round(d.grossProfit), 毛利率: parseFloat(d.grossMargin.toFixed(1)),
+      总毛利: Math.round(d.grossProfitTotal),
+    }));
+
+    const costBreakdown = isSale
+      ? [
+          { name: "硬件成本", value: current.hardwareCost || 0, color: "#ef4444", explanation: "当月单车硬件采购成本" },
+          { name: "预计负债/运营", value: current.totalCost - (current.hardwareCost || 0), color: "#f97316", explanation: "累计运营至年底成本 与 预计负债(售价×预计负债比例) 取孰高值" },
+        ]
+      : [
+          { name: isLease ? "折旧成本" : "租赁成本", value: current.unitLease, color: "#ef4444", explanation: isLease ? "硬件成本 × 折旧残值率 / 折旧年限 / 12" : "硬件成本 × (1+IRR) / 5 / 12" },
+          { name: "远驾安全员", value: current.remote, color: "#f97316", explanation: "远驾安全员月成本 / 远驾人车比 × (1+排班冗余)" },
+          { name: "充电", value: current.charging, color: "#eab308", explanation: "(接单总里程+空跑里程) × 能耗 × 电费单价 × 30天" },
+          { name: "云服务", value: current.cloud, color: "#8b5cf6", explanation: "日均单量×工单时长×带宽消耗×出口单价×30 + 拉流带宽×拉流单价/远驾人车比" },
+          { name: "客服+地勤+保险", value: current.cs + current.ground + current.insurance, color: "#06b6d4", explanation: "客服成本/客服人车比 + 地勤成本/地勤人车比 + 单车保险" },
+          { name: "风险+维修+补充", value: current.risk + current.repair + current.backup, color: "#ec4899", explanation: "百台车月事故×赔偿×风险概率 + 百台车月故障×工时×工时成本 + 补充运力" },
+          { name: "其他", value: current.traffic + current.mapping + current.warehouse + current.routeDeploy + current.maintenance, color: "#64748b", explanation: "流量费 + 采图制图 + 路线部署 + 仓储 + 维护" },
+        ];
+
+    return (
+      <div className="min-h-screen bg-gray-50 text-gray-800">
+        <header className="bg-white border-b border-gray-200 px-4 lg:px-6 py-3 flex flex-wrap items-center justify-between gap-2 sticky top-0 z-10">
+          <div>
+            <h1 className="text-base lg:text-lg font-bold text-gray-900">Robovan UE 交互模型</h1>
+            <p className="text-xs text-gray-500">三模式对比 · 修改参数实时联动</p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex bg-gray-100 rounded-lg p-1">
+              <button onClick={() => setActiveTab("monthly")} className={`px-3 py-1 text-xs rounded-md transition ${activeTab === "monthly" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>月度分析</button>
+              <button onClick={() => setActiveTab("annual")} className={`px-3 py-1 text-xs rounded-md transition ${activeTab === "annual" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>年度对比</button>
+            </div>
+            <div className="flex bg-blue-50 rounded-lg p-1">
+              {[
+                { k: "platform", l: "平台" },
+                { k: "lease", l: "租赁" },
+                { k: "sale", l: "卖车" },
+              ].map((b) => (
+                <button key={b.k} onClick={() => setMode(b.k)} className={`px-3 py-1 text-xs rounded-md transition ${mode === b.k ? "bg-blue-600 text-white" : "text-blue-600"}`}>{b.l}</button>
+              ))}
+            </div>
+            {activeTab === "monthly" && (
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                <button onClick={() => setViewMode("perVehicle")} className={`px-2 py-1 text-xs rounded-md transition ${viewMode === "perVehicle" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>单车</button>
+                <button onClick={() => setViewMode("total")} className={`px-2 py-1 text-xs rounded-md transition ${viewMode === "total" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>总盘子</button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        <div className="flex flex-col lg:flex-row">
+          {/* Left Sidebar */}
+          <aside className="w-full lg:w-80 bg-white border-r border-gray-200 lg:h-[calc(100vh-60px)] overflow-y-auto p-4">
+            <div className="mb-4">
+              <label className="text-xs font-semibold text-gray-700">聚焦月份</label>
+              <div className="flex gap-1 mt-2 flex-wrap">
+                {MONTHS.map((m, i) => (
+                  <button key={m} onClick={() => setSelectedMonth(i)}
+                    className={`px-2 py-1 text-xs rounded border transition ${selectedMonth === i ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-400"}`}>{m}</button>
+                ))}
+              </div>
+            </div>
+
+            <InputGroup title="📊 基础规模" gid="base" collapsed={collapsedGroups["base"]} onToggle={toggleGroup}>
+              {isSale && <MonthInput label="当月交付量" values={params.saleDeliveries} onChange={(i, v) => updateArrayParam("saleDeliveries", i, v)} />}
+              {!isSale && <MonthInput label="运营车辆数" values={params.vehicles} onChange={(i, v) => updateArrayParam("vehicles", i, v)} />}
+              {isSale && <NumInput label="单车售价" value={params.salePrice} onChange={(v) => updateParam("salePrice", v)} />}
+              {isSale && <NumInput label="预计负债比例" value={params.provisionRate} onChange={(v) => updateParam("provisionRate", v)} step={0.01} />}
+              {isPlatform && <NumInput label="单车收入（元/月）" value={params.platformRevenue} onChange={(v) => updateParam("platformRevenue", v)} />}
+              {isLease && <NumInput label="单车收入（元/月）" value={params.leaseRevenue} onChange={(v) => updateParam("leaseRevenue", v)} />}
+            </InputGroup>
+
+            <InputGroup title="🏭 资产与租赁" gid="asset" collapsed={collapsedGroups["asset"]} onToggle={toggleGroup}>
+              <MonthInput label="硬件成本（元）" values={params.hardwareCost} onChange={(i, v) => updateArrayParam("hardwareCost", i, v)} />
+              <NumInput label="IRR" value={params.irr} onChange={(v) => updateParam("irr", v)} step={0.01} disabled={!isPlatform} />
+              {isLease && <NumInput label="折旧残值率" value={params.depreciationRate} onChange={(v) => updateParam("depreciationRate", v)} step={0.01} />}
+              {isLease && <NumInput label="折旧年限" value={params.depreciationYears} onChange={(v) => updateParam("depreciationYears", v)} />}
+            </InputGroup>
+
+            <InputGroup title="👥 人力配置" gid="hr" collapsed={collapsedGroups["hr"]} onToggle={toggleGroup}>
+              <MonthInput label="远驾人车比" values={params.remoteRatio} onChange={(i, v) => updateArrayParam("remoteRatio", i, v)} />
+              <NumInput label="远驾安全员成本" value={params.remoteCost} onChange={(v) => updateParam("remoteCost", v)} />
+              <NumInput label="客服人车比" value={params.csRatio} onChange={(v) => updateParam("csRatio", v)} />
+              <NumInput label="客服成本" value={params.csCost} onChange={(v) => updateParam("csCost", v)} />
+              <NumInput label="地勤人车比" value={params.groundRatio} onChange={(v) => updateParam("groundRatio", v)} />
+              <NumInput label="地勤成本" value={params.groundCost} onChange={(v) => updateParam("groundCost", v)} />
+              <NumInput label="排班冗余" value={params.shiftRedundancy} onChange={(v) => updateParam("shiftRedundancy", v)} step={0.01} />
+            </InputGroup>
+
+            <InputGroup title="⚡ 能耗与运营" gid="energy" collapsed={collapsedGroups["energy"]} onToggle={toggleGroup}>
+              <MonthInput label="能耗（度/公里）" values={params.energy} onChange={(i, v) => updateArrayParam("energy", i, v)} step={0.01} disabled={!isPlatform} />
+              <NumInput label="电费单价" value={params.electricityPrice} onChange={(v) => updateParam("electricityPrice", v)} step={0.1} disabled={!isPlatform} />
+              <NumInput label="接单总里程" value={params.orderMileage} onChange={(v) => updateParam("orderMileage", v)} />
+              <NumInput label="每天空跑里程" value={params.emptyMileage} onChange={(v) => updateParam("emptyMileage", v)} />
+            </InputGroup>
+
+            <InputGroup title="☁️ 云服务" gid="cloud" collapsed={collapsedGroups["cloud"]} onToggle={toggleGroup}>
+              <MonthInput label="MPRI" values={params.mpir} onChange={(i, v) => updateArrayParam("mpir", i, v)} />
+              <NumInput label="工单时长（秒）" value={params.workOrderDuration} onChange={(v) => updateParam("workOrderDuration", v)} />
+              <NumInput label="每舱拉流带宽" value={params.streamBandwidth} onChange={(v) => updateParam("streamBandwidth", v)} step={0.001} />
+              <NumInput label="每G拉流带宽费用" value={params.bandwidthCostPerG} onChange={(v) => updateParam("bandwidthCostPerG", v)} />
+              <NumInput label="每秒消耗带宽" value={params.bandwidthConsumption} onChange={(v) => updateParam("bandwidthConsumption", v)} step={0.0001} />
+              <NumInput label="每G出口流量单价" value={params.egressCost} onChange={(v) => updateParam("egressCost", v)} step={0.1} />
+            </InputGroup>
+
+            <InputGroup title="⚠️ 风险与维修" gid="risk" collapsed={collapsedGroups["risk"]} onToggle={toggleGroup}>
+              <MonthInput label="百台车月事故次数" values={params.accidents} onChange={(i, v) => updateArrayParam("accidents", i, v)} />
+              <NumInput label="单次赔偿金额" value={params.compensation} onChange={(v) => updateParam("compensation", v)} />
+              <NumInput label="风险概率" value={params.riskProb} onChange={(v) => updateParam("riskProb", v)} step={0.1} />
+              <NumInput label="百台车月故障次数" value={params.faults} onChange={(v) => updateParam("faults", v)} />
+              <NumInput label="单次维修工时" value={params.repairHours} onChange={(v) => updateParam("repairHours", v)} />
+              <NumInput label="单工时成本" value={params.laborCost} onChange={(v) => updateParam("laborCost", v)} />
+              <NumInput label="补充运力单价" value={params.backupPrice} onChange={(v) => updateParam("backupPrice", v)} />
+            </InputGroup>
+
+            <InputGroup title="🧾 其他费用" gid="other" collapsed={collapsedGroups["other"]} onToggle={toggleGroup}>
+              <MonthInput label="流量费" values={params.trafficCost} onChange={(i, v) => updateArrayParam("trafficCost", i, v)} />
+              <MonthInput label="采图制图" values={params.mappingCost} onChange={(i, v) => updateArrayParam("mappingCost", i, v)} />
+              <NumInput label="路线部署" value={params.routeDeploy} onChange={(v) => updateParam("routeDeploy", v)} />
+              <NumInput label="仓储" value={params.warehouse} onChange={(v) => updateParam("warehouse", v)} disabled={!isPlatform} />
+              <NumInput label="保险（月）" value={params.insurance} onChange={(v) => updateParam("insurance", v)} />
+            </InputGroup>
+          </aside>
+
+          {/* Main Content */}
+          <main className="flex-1 p-4 lg:p-6 overflow-y-auto lg:h-[calc(100vh-60px)]">
+            {activeTab === "monthly" ? (
+              <>
+                {/* 全年汇总 */}
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100 p-4 mb-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-gray-800">
+                      {mode === "platform" ? "平台模式" : mode === "lease" ? "租赁模式" : "卖车模式"} · 全年汇总
+                    </h3>
+                    <span className="text-xs text-gray-500">2026年5月-12月</span>
+                  </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {(() => {
+                      const totalRevenue = allData.reduce((s, d) => s + d.revenueTotal, 0);
+                      const totalCost = allData.reduce((s, d) => s + d.costTotal, 0);
+                      const totalGp = allData.reduce((s, d) => s + d.grossProfitTotal, 0);
+                      const gm = totalRevenue > 0 ? (totalGp / totalRevenue) * 100 : 0;
+                      return [
+                        { label: "全年收入", value: formatWan(totalRevenue), sub: `${formatNum(totalRevenue)}元` },
+                        { label: "全年成本", value: formatWan(totalCost), sub: `${formatNum(totalCost)}元` },
+                        { label: "全年毛利", value: formatWan(totalGp), sub: totalGp >= 0 ? "盈利" : "亏损", positive: totalGp >= 0 },
+                        { label: "全年毛利率", value: `${gm.toFixed(1)}%`, sub: gm >= 0 ? "正值" : "负值", positive: gm >= 0 },
+                      ].map((c) => (
+                        <div key={c.label} className="bg-white rounded-lg p-3 shadow-sm">
+                          <div className="text-xs text-gray-500">{c.label}</div>
+                          <div className={`text-base lg:text-lg font-bold ${c.positive === true ? "text-green-700" : c.positive === false ? "text-red-700" : "text-gray-900"}`}>{c.value}</div>
+                          <div className="text-xs text-gray-400">{c.sub}</div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                {/* KPI Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4 mb-5">
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <div className="text-xs text-gray-500 mb-1">{viewMode === "perVehicle" ? "单车收入" : "当月总收入"}</div>
+                    <div className="text-lg lg:text-xl font-bold text-gray-900">{viewMode === "perVehicle" ? formatNum(current.revenue) : formatWan(current.revenueTotal)}</div>
+                    <div className="text-xs text-gray-400 mt-1">{current.month} · {current.vehicleCount}{isSale ? "辆交付" : "辆车"}</div>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <div className="text-xs text-gray-500 mb-1">{viewMode === "perVehicle" ? "单车成本" : "当月总成本"}</div>
+                    <div className="text-lg lg:text-xl font-bold text-gray-900">{viewMode === "perVehicle" ? formatNum(current.totalCost) : formatWan(current.costTotal)}</div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {isSale ? `硬件 ${formatNum(current.hardwareCost || 0)}` : `${isLease ? "折旧" : "租赁"} ${formatNum(current.unitLease)}`}
+                    </div>
+                  </div>
+                  <div className={`rounded-xl shadow-sm border p-4 ${current.grossProfit >= 0 ? "bg-green-50 border-green-100" : "bg-red-50 border-red-100"}`}>
+                    <div className="text-xs text-gray-500 mb-1">{viewMode === "perVehicle" ? "单车毛利" : "当月总毛利"}</div>
+                    <div className={`text-lg lg:text-xl font-bold ${current.grossProfit >= 0 ? "text-green-700" : "text-red-700"}`}>{viewMode === "perVehicle" ? formatNum(current.grossProfit) : formatWan(current.grossProfitTotal)}</div>
+                    <div className={`text-xs mt-1 ${current.grossProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{current.grossProfit >= 0 ? "盈利" : "亏损"}</div>
+                  </div>
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <div className="text-xs text-gray-500 mb-1">毛利率</div>
+                    <div className={`text-lg lg:text-xl font-bold ${current.grossMargin >= 0 ? "text-green-700" : "text-red-700"}`}>{current.grossMargin.toFixed(1)}%</div>
+                    <div className="text-xs text-gray-400 mt-1">{current.month} 当月</div>
+                  </div>
+                </div>
+
+                {/* Charts Row 1 */}
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6 mb-5">
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <h3 className="text-sm font-semibold text-gray-800 mb-3">{isSale ? "单车成本结构" : "单车成本结构趋势（元/车/月）"}</h3>
+                    <ResponsiveContainer width="100%" height={280} key={mode + "-cost"}>
+                      {isSale ? (
+                        <BarChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                          <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <Tooltip formatter={(val) => formatNum(val)} contentStyle={{ fontSize: 12 }} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Bar dataKey="单车收入" fill="#10b981" isAnimationActive={false} />
+                          <Bar dataKey="单车成本" fill="#ef4444" isAnimationActive={false} />
+                        </BarChart>
+                      ) : (
+                        <BarChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                          <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <Tooltip formatter={(val) => formatNum(val)} contentStyle={{ fontSize: 12 }} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                          <Bar dataKey="租赁成本" stackId="cost" fill="#ef4444" isAnimationActive={false} />
+                          <Bar dataKey="远驾安全员" stackId="cost" fill="#f97316" isAnimationActive={false} />
+                          <Bar dataKey="充电" stackId="cost" fill="#eab308" isAnimationActive={false} />
+                          <Bar dataKey="云服务" stackId="cost" fill="#8b5cf6" isAnimationActive={false} />
+                          <Bar dataKey="客服地勤保险" stackId="cost" fill="#06b6d4" isAnimationActive={false} />
+                          <Bar dataKey="风险维修补充" stackId="cost" fill="#ec4899" isAnimationActive={false} />
+                          <Bar dataKey="其他费用" stackId="cost" fill="#64748b" isAnimationActive={false} />
+                        </BarChart>
+                      )}
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                    <h3 className="text-sm font-semibold text-gray-800 mb-3">{current.month} 成本明细（单车）</h3>
+                    <div className="space-y-2">
+                      {costBreakdown.map((item) => (
+                        <div key={item.name} className="flex items-center gap-3">
+                          <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                          <div className="flex-1 flex justify-between items-center min-w-0">
+                            <span className="text-xs text-gray-600 truncate" title={item.explanation}>{item.name}</span>
+                            <span className="text-xs font-medium text-gray-900 ml-2">{formatNum(item.value)}</span>
+                          </div>
+                          <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden shrink-0">
+                            <div className="h-full rounded-full" style={{ width: `${Math.min((item.value / current.totalCost) * 100, 100)}%`, backgroundColor: item.color }} />
+                          </div>
+                          <span className="text-xs text-gray-400 w-10 text-right shrink-0">{current.totalCost > 0 ? ((item.value / current.totalCost) * 100).toFixed(1) : 0}%</span>
+                        </div>
+                      ))}
+                      <div className="border-t border-gray-100 pt-2 mt-2 flex justify-between items-center">
+                        <span className="text-xs font-semibold text-gray-800">单车成本合计</span>
+                        <span className="text-sm font-bold text-gray-900">{formatNum(current.totalCost)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-semibold text-gray-800">单车收入</span>
+                        <span className="text-sm font-bold text-green-600">{formatNum(current.revenue)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-semibold text-gray-800">单车毛利</span>
+                        <span className={`text-sm font-bold ${current.grossProfit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatNum(current.grossProfit)}</span>
+                      </div>
+                      {isSale && (
+                        <div className="bg-gray-50 rounded-lg p-2 mt-2 text-xs text-gray-600">
+                          <div>累计运营至年底: {formatNum(current.operatingCost)}</div>
+                          <div>预计负债(30%): {formatNum(current.provision)}</div>
+                          <div>实际计入成本: {formatNum(Math.max(current.operatingCost, current.provision || 0))}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trend Chart */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3">月度趋势（{isSale ? "单车" : "单车"}）</h3>
+                  <ResponsiveContainer width="100%" height={300} key={mode + "-trend"}>
+                    <ComposedChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                      <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} unit="%" />
+                      <Tooltip contentStyle={{ fontSize: 12 }} formatter={(val, name) => [formatNum(val), name]} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar yAxisId="left" dataKey="单车收入" fill="#10b981" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                      <Bar yAxisId="left" dataKey="单车成本" fill="#ef4444" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+                      <Line yAxisId="left" type="monotone" dataKey="单车毛利" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+                      <Line yAxisId="right" type="monotone" dataKey="毛利率" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Total Profit Trend */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3">{isSale ? "当月交付毛利趋势" : "总毛利趋势"}（万元）</h3>
+                  <ResponsiveContainer width="100%" height={250} key={mode + "-profit"}>
+                    <AreaChart data={chartData}>
+                      <defs>
+                        <linearGradient id="gpGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35}/>
+                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => (v / 10000).toFixed(0)} />
+                      <Tooltip formatter={(val) => formatWan(val)} contentStyle={{ fontSize: 12 }} />
+                      <Area type="monotone" dataKey="总毛利" stroke="#6366f1" strokeWidth={2} fill="url(#gpGradient)" dot={{ r: 3, fill: "#6366f1" }} activeDot={{ r: 5 }} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Sensitivity */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-2">敏感性分析 · {current.month} · 各因子±10%对单车毛利的影响</h3>
+                  <p className="text-xs text-gray-500 mb-3 bg-gray-50 rounded-lg px-3 py-2 leading-relaxed">
+                    每个因子单独波动±10%时，对单车毛利的影响金额（元）。<strong className="text-gray-700">绿色 = 毛利增加，红色 = 毛利减少</strong>。条形越长敏感度越高，是重点关注项。左侧为因子-10%的效果，右侧为因子+10%的效果。
+                  </p>
+                  <div className="flex items-center gap-4 text-xs text-gray-500 mb-3 px-1">
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-green-400" /> 毛利增加</span>
+                    <span className="flex items-center gap-1"><span className="inline-block w-3 h-3 rounded bg-red-400" /> 毛利减少</span>
+                    <span className="text-gray-400 ml-2">←因子-10% | 因子+10%→</span>
+                  </div>
+                  <div className="space-y-3">
+                    {sens.sort((a, b) => Math.max(Math.abs(b.up), Math.abs(b.down)) - Math.max(Math.abs(a.up), Math.abs(a.down))).map((s) => {
+                      const scale = Math.max(...sens.map((x) => Math.max(Math.abs(x.up), Math.abs(x.down)))) || 1;
+                      return (
+                        <div key={s.label} className="flex items-center gap-3">
+                          <div className="w-28 lg:w-32 text-xs text-gray-600 text-right shrink-0 truncate" title={s.label}>{s.label}</div>
+                          <div className="flex-1 flex items-center relative h-6 bg-gray-50 rounded overflow-hidden">
+                            {s.down < 0 ? <div className="absolute right-1/2 h-4 bg-red-400 rounded-l" style={{ width: `${(Math.abs(s.down) / scale) * 50}%` }} /> : <div className="absolute right-1/2 h-4 bg-green-400 rounded-l" style={{ width: `${(Math.abs(s.down) / scale) * 50}%` }} />}
+                            {s.up >= 0 ? <div className="absolute left-1/2 h-4 bg-green-400 rounded-r" style={{ width: `${(Math.abs(s.up) / scale) * 50}%` }} /> : <div className="absolute left-1/2 h-4 bg-red-400 rounded-r" style={{ width: `${(Math.abs(s.up) / scale) * 50}%` }} />}
+                            <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gray-300" />
+                          </div>
+                          <div className="w-20 lg:w-28 text-xs text-gray-500 shrink-0 text-right">
+                            <span className={s.down >= 0 ? "text-green-600" : "text-red-600"}>{s.down >= 0 ? "+" : ""}{s.down.toFixed(0)}</span>
+                            <span className="mx-1 text-gray-300">|</span>
+                            <span className={s.up >= 0 ? "text-green-600" : "text-red-600"}>{s.up >= 0 ? "+" : ""}{s.up.toFixed(0)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Formula Reference */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3">计算公式与口径说明 · {mode === "platform" ? "平台模式" : mode === "lease" ? "租赁模式" : "卖车模式"}</h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-2 text-xs text-gray-600">
+                    {isSale ? (
+                      <>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">单车成本</span><span>= 硬件成本 + max(累计运营成本, 预计负债)</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">预计负债</span><span>= 单车售价 × 预计负债比例</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">累计运营</span><span>= 从当前月至12月的月度运营成本累加</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">单车毛利</span><span>= 单车售价 - 单车成本</span></div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">{isLease ? "折旧成本" : "租赁成本"}</span><span>= 硬件成本 {isLease ? "× 折旧残值率 / 折旧年限 / 12" : "× (1+IRR) / 5 / 12"}</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">远驾安全员</span><span>= 远驾安全员月成本 / 远驾人车比 × (1+排班冗余)</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">客服成本</span><span>= 客服成本 / 客服人车比 × (1+排班冗余)</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">地勤成本</span><span>= 地勤成本 / 地勤人车比 × (1+排班冗余)</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">风险成本</span><span>= 百台车月事故次数 × 赔偿金额 × 风险概率 × 车辆数/100</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">云服务</span><span>= 日均单量×工单时长×带宽消耗×出口单价×30 + 拉流带宽×拉流单价/远驾人车比</span></div>
+                        {isPlatform && <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">充电</span><span>= (接单总里程+空跑里程) × 能耗 × 电费单价 × 30</span></div>}
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">单车毛利</span><span>= 单车收入 - 单车成本</span></div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Annual Comparison Tab */
+              <>
+                <h2 className="text-lg font-bold text-gray-900 mb-4">三种模式年度对比（2026年5-12月）</h2>
+
+                {/* Annual Summary Cards */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+                  {annualSummary.map((item) => (
+                    <div key={item.name} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4" style={{ borderLeft: `4px solid ${item.color}` }}>
+                      <div className="text-sm font-bold text-gray-800 mb-3">{item.name}</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-500">全年收入</div>
+                          <div className="text-base font-bold text-gray-900">{formatWan(item.revenue)}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500">全年成本</div>
+                          <div className="text-base font-bold text-gray-900">{formatWan(item.cost)}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500">全年毛利</div>
+                          <div className={`text-base font-bold ${item.gp >= 0 ? "text-green-700" : "text-red-700"}`}>{formatWan(item.gp)}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500">全年毛利率</div>
+                          <div className={`text-base font-bold ${item.gm >= 0 ? "text-green-700" : "text-red-700"}`}>{item.gm.toFixed(1)}%</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Annual Comparison — 三维度：收入、成本、毛利分别对比（竖状条形图） */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+                  {[
+                    { title: "全年收入对比", key: "revenue", unit: "万元" },
+                    { title: "全年成本对比", key: "cost", unit: "万元" },
+                    { title: "全年毛利对比", key: "gp", unit: "万元" },
+                  ].map((dim) => (
+                    <div key={dim.key} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+                      <h4 className="text-sm font-semibold text-gray-800 mb-2">{dim.title}（{dim.unit}）</h4>
+                      <CustomBarChart
+                        symmetric={false}
+                        height={260}
+                        data={[
+                          { name: "平台", value: annualSummary[0][dim.key], color: "#3b82f6" },
+                          { name: "租赁", value: annualSummary[1][dim.key], color: "#8b5cf6" },
+                          { name: "卖车", value: annualSummary[2][dim.key], color: "#f59e0b" },
+                        ]}
+                        bars={[{ key: "value", name: dim.title.replace("对比", ""), color: "#3b82f6" }]}
+                        yFormat={(v) => (v / 10000).toFixed(0)}
+                        tooltipFormat={formatWan}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Monthly comparison across modes — 月度毛利走势曲线 */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-4">各模式月度总毛利走势（万元）</h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <ComposedChart data={annualChartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} unit="万" />
+                      <Tooltip contentStyle={{ fontSize: 12 }} formatter={(val) => `${val}万`} />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Line type="monotone" dataKey="平台毛利" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="租赁毛利" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="卖车毛利" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Annual Table */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6 overflow-x-auto">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-4">年度数据明细</h3>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left py-2 px-2 text-gray-600 font-medium">指标</th>
+                        <th className="text-right py-2 px-2 text-gray-600 font-medium">平台模式</th>
+                        <th className="text-right py-2 px-2 text-gray-600 font-medium">租赁模式</th>
+                        <th className="text-right py-2 px-2 text-gray-600 font-medium">卖车模式</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { label: "全年收入", get: (d) => formatWan(d.reduce((s, x) => s + x.revenueTotal, 0)) },
+                        { label: "全年成本", get: (d) => formatWan(d.reduce((s, x) => s + x.costTotal, 0)) },
+                        { label: "全年毛利", get: (d) => formatWan(d.reduce((s, x) => s + x.grossProfitTotal, 0)) },
+                        { label: "全年毛利率", get: (d) => { const rev = d.reduce((s, x) => s + x.revenueTotal, 0); const gp = d.reduce((s, x) => s + x.grossProfitTotal, 0); return rev > 0 ? (gp / rev * 100).toFixed(1) + "%" : "-"; } },
+                        { label: "最高单月毛利", get: (d) => formatWan(Math.max(...d.map((x) => x.grossProfitTotal))) },
+                        { label: "最低单月毛利", get: (d) => formatWan(Math.min(...d.map((x) => x.grossProfitTotal))) },
+                      ].map((row) => (
+                        <tr key={row.label} className="border-b border-gray-50">
+                          <td className="py-2 px-2 text-gray-800 font-medium">{row.label}</td>
+                          <td className="py-2 px-2 text-right text-gray-600">{row.get(annualPlatform)}</td>
+                          <td className="py-2 px-2 text-right text-gray-600">{row.get(annualLease)}</td>
+                          <td className="py-2 px-2 text-right text-gray-600">{row.get(annualSale)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App />);
+</script>
+</body>
+</html>
