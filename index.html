@@ -420,26 +420,38 @@
 
     const chartData = allData.map((d) => ({
       month: d.month, 车辆数: d.vehicleCount,
-      租赁成本: Math.round(d.unitLease), 远驾安全员: Math.round(d.remote), 充电: Math.round(d.charging),
-      云服务: Math.round(d.cloud), 客服地勤保险: Math.round(d.cs + d.ground + d.insurance),
-      风险维修补充: Math.round(d.risk + d.repair + d.backup), 其他费用: Math.round(d.traffic + d.mapping + d.warehouse + d.routeDeploy + d.maintenance),
+      租赁成本: Math.round(d.unitLease),
+      仓储: Math.round(d.warehouse), 地勤: Math.round(d.ground), 路线部署: Math.round(d.routeDeploy), 维护: Math.round(d.maintenance),
+      充电: Math.round(d.charging), 远驾安全员: Math.round(d.remote), 客服: Math.round(d.cs), 保险: Math.round(d.insurance),
+      风险赔偿: Math.round(d.risk), 流量: Math.round(d.traffic), 云服务: Math.round(d.cloud), 补充运力: Math.round(d.backup), 维修: Math.round(d.repair), 采图制图: Math.round(d.mapping),
       单车收入: Math.round(d.revenue), 单车成本: Math.round(d.totalCost), 单车毛利: Math.round(d.grossProfit), 毛利率: parseFloat(d.grossMargin.toFixed(1)),
       总毛利: Math.round(d.grossProfitTotal),
     }));
 
     const costBreakdown = isSale
       ? [
-          { name: "硬件成本", value: current.hardwareCost || 0, color: "#ef4444", explanation: "当月单车硬件采购成本" },
-          { name: "预计负债/运营", value: current.totalCost - (current.hardwareCost || 0), color: "#f97316", explanation: "累计运营至年底成本 与 预计负债(售价×预计负债比例) 取孰高值" },
+          { name: "硬件成本", value: current.hardwareCost || 0, color: "#ef4444", explanation: "当月单车硬件采购成本", section: "asset" },
+          { name: "预计负债/运营", value: current.totalCost - (current.hardwareCost || 0), color: "#f97316", explanation: "累计运营至年底成本 与 预计负债(售价×预计负债比例) 取孰高值", section: "asset" },
         ]
       : [
-          { name: isLease ? "折旧成本" : "租赁成本", value: current.unitLease, color: "#ef4444", explanation: isLease ? "硬件成本 × 折旧残值率 / 折旧年限 / 12" : "硬件成本 × (1+IRR) / 5 / 12" },
-          { name: "远驾安全员", value: current.remote, color: "#f97316", explanation: "远驾安全员月成本 / 远驾人车比 × (1+排班冗余)" },
-          { name: "充电", value: current.charging, color: "#eab308", explanation: "(接单总里程+空跑里程) × 能耗 × 电费单价 × 30天" },
-          { name: "云服务", value: current.cloud, color: "#8b5cf6", explanation: "日均单量×工单时长×带宽消耗×出口单价×30 + 拉流带宽×拉流单价/远驾人车比" },
-          { name: "客服+地勤+保险", value: current.cs + current.ground + current.insurance, color: "#06b6d4", explanation: "客服成本/客服人车比 + 地勤成本/地勤人车比 + 单车保险" },
-          { name: "风险+维修+补充", value: current.risk + current.repair + current.backup, color: "#ec4899", explanation: "百台车月事故×赔偿×风险概率 + 百台车月故障×工时×工时成本 + 补充运力" },
-          { name: "其他", value: current.traffic + current.mapping + current.warehouse + current.routeDeploy + current.maintenance, color: "#64748b", explanation: "流量费 + 采图制图 + 路线部署 + 仓储 + 维护" },
+          { sectionTitle: "资产侧（单车）", section: "hdr" },
+          { name: isLease ? "折旧成本" : "租赁成本", value: current.unitLease, color: "#dc2626", explanation: isLease ? "硬件成本 × 折旧残值率 / 折旧年限 / 12" : "硬件成本 × (1+IRR) / 5 / 12", section: "asset" },
+          { sectionTitle: "运营变动成本（单车/月）", section: "hdr" },
+          { name: "充电", value: current.charging, color: "#ca8a04", explanation: "空跑里程 × 能耗 × 电费单价 × 30（平台模式；租赁/卖车当前未计充电）", section: "var" },
+          { name: "远驾安全员", value: current.remote, color: "#ea580c", explanation: "远驾安全员月成本 / 远驾人车比 × (1+排班冗余)", section: "var" },
+          { name: "客服", value: current.cs, color: "#0d9488", explanation: "客服成本 / 客服人车比 × (1+排班冗余)", section: "var" },
+          { name: "保险（含免赔额口径）", value: current.insurance, color: "#0284c7", explanation: "单车月度保费输入值；免赔额以下损失可通过事故次数与单次赔偿参数刻画", section: "var" },
+          { name: "风险赔偿", value: current.risk, color: "#b91c1c", explanation: "百台车月事故 × 赔偿 × 风险概率 / 折算单车", section: "var" },
+          { name: "流量", value: current.traffic, color: "#65a30d", explanation: "月度流量费（按参数）", section: "var" },
+          { name: "云服务", value: current.cloud, color: "#7c3aed", explanation: "工单与出口流量云成本 + 拉流带宽分摊", section: "var" },
+          { name: "补充运力", value: current.backup, color: "#db2777", explanation: "补充运力单价 × 接单里程 × 百台车月事故 / 100", section: "var" },
+          { name: "维修", value: current.repair, color: "#be185d", explanation: "百台车月故障 × 工时 × 工时成本 / 100", section: "var" },
+          { name: "采图制图", value: current.mapping, color: "#475569", explanation: "采图制图月度摊销（按参数）", section: "var" },
+          { sectionTitle: "运营固定月成本（单车）", section: "hdr" },
+          { name: "仓储", value: current.warehouse, color: "#78716c", explanation: "单车仓储固定额（平台模式；租赁为 0）", section: "fix" },
+          { name: "地勤人员", value: current.ground, color: "#b45309", explanation: "地勤成本 / 地勤人车比 × (1+排班冗余)", section: "fix" },
+          { name: "路线部署", value: current.routeDeploy, color: "#57534e", explanation: "路线部署月度摊销", section: "fix" },
+          { name: "维护", value: current.maintenance, color: "#a8a29e", explanation: "其他固定维护（参数，默认 0）", section: "fix" },
         ];
 
     return (
@@ -447,7 +459,7 @@
         <header className="bg-white border-b border-gray-200 px-4 lg:px-6 py-3 flex flex-wrap items-center justify-between gap-2 sticky top-0 z-10">
           <div>
             <h1 className="text-base lg:text-lg font-bold text-gray-900">Robovan UE 交互模型</h1>
-            <p className="text-xs text-gray-500">三模式对比 · 修改参数实时联动</p>
+            <p className="text-xs text-gray-500">三模式对比 · 运营变动/固定/资产分项 · 修改参数实时联动</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex bg-gray-100 rounded-lg p-1">
@@ -551,7 +563,7 @@
               <MonthInput label="采图制图" values={params.mappingCost} onChange={(i, v) => updateArrayParam("mappingCost", i, v)} />
               <NumInput label="路线部署" value={params.routeDeploy} onChange={(v) => updateParam("routeDeploy", v)} />
               <NumInput label="仓储" value={params.warehouse} onChange={(v) => updateParam("warehouse", v)} disabled={!isPlatform} />
-              <NumInput label="保险（月）" value={params.insurance} onChange={(v) => updateParam("insurance", v)} />
+              <NumInput label="保险（月，免赔另见事故/赔偿）" value={params.insurance} onChange={(v) => updateParam("insurance", v)} />
             </InputGroup>
           </aside>
 
@@ -636,35 +648,50 @@
                           <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                           <YAxis tick={{ fontSize: 11 }} />
                           <Tooltip formatter={(val) => formatNum(val)} contentStyle={{ fontSize: 12 }} />
-                          <Legend wrapperStyle={{ fontSize: 11 }} />
-                          <Bar dataKey="租赁成本" stackId="cost" fill="#ef4444" isAnimationActive={false} />
-                          <Bar dataKey="远驾安全员" stackId="cost" fill="#f97316" isAnimationActive={false} />
-                          <Bar dataKey="充电" stackId="cost" fill="#eab308" isAnimationActive={false} />
-                          <Bar dataKey="云服务" stackId="cost" fill="#8b5cf6" isAnimationActive={false} />
-                          <Bar dataKey="客服地勤保险" stackId="cost" fill="#06b6d4" isAnimationActive={false} />
-                          <Bar dataKey="风险维修补充" stackId="cost" fill="#ec4899" isAnimationActive={false} />
-                          <Bar dataKey="其他费用" stackId="cost" fill="#64748b" isAnimationActive={false} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} layout="horizontal" align="center" />
+                          <Bar dataKey="租赁成本" stackId="cost" fill="#dc2626" name="租赁/折旧" isAnimationActive={false} />
+                          <Bar dataKey="充电" stackId="cost" fill="#ca8a04" name="充电" isAnimationActive={false} />
+                          <Bar dataKey="远驾安全员" stackId="cost" fill="#ea580c" name="远驾安全员" isAnimationActive={false} />
+                          <Bar dataKey="客服" stackId="cost" fill="#0d9488" name="客服" isAnimationActive={false} />
+                          <Bar dataKey="保险" stackId="cost" fill="#0284c7" name="保险" isAnimationActive={false} />
+                          <Bar dataKey="风险赔偿" stackId="cost" fill="#b91c1c" name="风险赔偿" isAnimationActive={false} />
+                          <Bar dataKey="流量" stackId="cost" fill="#65a30d" name="流量" isAnimationActive={false} />
+                          <Bar dataKey="云服务" stackId="cost" fill="#7c3aed" name="云服务" isAnimationActive={false} />
+                          <Bar dataKey="补充运力" stackId="cost" fill="#db2777" name="补充运力" isAnimationActive={false} />
+                          <Bar dataKey="维修" stackId="cost" fill="#be185d" name="维修" isAnimationActive={false} />
+                          <Bar dataKey="采图制图" stackId="cost" fill="#475569" name="采图制图" isAnimationActive={false} />
+                          <Bar dataKey="仓储" stackId="cost" fill="#78716c" name="仓储" isAnimationActive={false} />
+                          <Bar dataKey="地勤" stackId="cost" fill="#b45309" name="地勤" isAnimationActive={false} />
+                          <Bar dataKey="路线部署" stackId="cost" fill="#57534e" name="路线部署" isAnimationActive={false} />
+                          <Bar dataKey="维护" stackId="cost" fill="#a8a29e" name="维护" isAnimationActive={false} />
                         </BarChart>
                       )}
                     </ResponsiveContainer>
                   </div>
 
                   <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-3">{current.month} 成本明细（单车）</h3>
+                    <h3 className="text-sm font-semibold text-gray-800 mb-1">{current.month} 成本明细（单车）</h3>
+                    {!isSale && <p className="text-[10px] text-gray-400 mb-2 leading-snug">区分：运营变动成本 · 运营固定月成本 · 资产侧（租赁/折旧）</p>}
                     <div className="space-y-2">
-                      {costBreakdown.map((item) => (
-                        <div key={item.name} className="flex items-center gap-3">
-                          <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                          <div className="flex-1 flex justify-between items-center min-w-0">
-                            <span className="text-xs text-gray-600 truncate" title={item.explanation}>{item.name}</span>
-                            <span className="text-xs font-medium text-gray-900 ml-2">{formatNum(item.value)}</span>
+                      {costBreakdown.map((item, idx) =>
+                        item.section === "hdr" ? (
+                          <div key={`hdr-${item.sectionTitle}-${idx}`} className="pt-3 pb-1 first:pt-0 border-t border-gray-100 first:border-0">
+                            <span className="text-[11px] font-semibold text-gray-500">{item.sectionTitle}</span>
                           </div>
-                          <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden shrink-0">
-                            <div className="h-full rounded-full" style={{ width: `${Math.min((item.value / current.totalCost) * 100, 100)}%`, backgroundColor: item.color }} />
+                        ) : (
+                          <div key={item.name} className="flex items-center gap-3">
+                            <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                            <div className="flex-1 flex justify-between items-center min-w-0">
+                              <span className="text-xs text-gray-600 truncate" title={item.explanation}>{item.name}</span>
+                              <span className="text-xs font-medium text-gray-900 ml-2">{formatNum(item.value)}</span>
+                            </div>
+                            <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden shrink-0">
+                              <div className="h-full rounded-full" style={{ width: `${Math.min((item.value / current.totalCost) * 100, 100)}%`, backgroundColor: item.color }} />
+                            </div>
+                            <span className="text-xs text-gray-400 w-10 text-right shrink-0">{current.totalCost > 0 ? ((item.value / current.totalCost) * 100).toFixed(1) : 0}%</span>
                           </div>
-                          <span className="text-xs text-gray-400 w-10 text-right shrink-0">{current.totalCost > 0 ? ((item.value / current.totalCost) * 100).toFixed(1) : 0}%</span>
-                        </div>
-                      ))}
+                        )
+                      )}
                       <div className="border-t border-gray-100 pt-2 mt-2 flex justify-between items-center">
                         <span className="text-xs font-semibold text-gray-800">单车成本合计</span>
                         <span className="text-sm font-bold text-gray-900">{formatNum(current.totalCost)}</span>
@@ -773,14 +800,25 @@
                       </>
                     ) : (
                       <>
-                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">{isLease ? "折旧成本" : "租赁成本"}</span><span>= 硬件成本 {isLease ? "× 折旧残值率 / 折旧年限 / 12" : "× (1+IRR) / 5 / 12"}</span></div>
-                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">远驾安全员</span><span>= 远驾安全员月成本 / 远驾人车比 × (1+排班冗余)</span></div>
-                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">客服成本</span><span>= 客服成本 / 客服人车比 × (1+排班冗余)</span></div>
-                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">地勤成本</span><span>= 地勤成本 / 地勤人车比 × (1+排班冗余)</span></div>
-                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">风险成本</span><span>= 百台车月事故次数 × 赔偿金额 × 风险概率 × 车辆数/100</span></div>
-                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">云服务</span><span>= 日均单量×工单时长×带宽消耗×出口单价×30 + 拉流带宽×拉流单价/远驾人车比</span></div>
-                        {isPlatform && <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">充电</span><span>= (接单总里程+空跑里程) × 能耗 × 电费单价 × 30</span></div>}
-                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-20 text-right">单车毛利</span><span>= 单车收入 - 单车成本</span></div>
+                        <div className="col-span-2 text-[11px] font-semibold text-gray-500 mb-1 mt-1">运营变动成本（随业务量/里程/事故等波动）</div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">充电</span><span>{isPlatform ? "空跑里程 × 能耗 × 电费 × 30" : "当前租赁/卖车模式未计入"}</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">远驾安全员</span><span>= 远驾安全员月成本 / 远驾人车比 × (1+排班冗余)</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">客服</span><span>= 客服成本 / 客服人车比 × (1+排班冗余)</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">保险</span><span>= 左侧录入的单车月度保费；免赔额以下损失可通过事故率与单次赔偿刻画</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">风险赔偿</span><span>= 百台车月事故 × 赔偿 × 风险概率 → 折算单车</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">流量</span><span>= 月度流量费参数</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">云服务</span><span>= 日均单量×工单×带宽消耗×出口×30 + 拉流分摊</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">补充运力</span><span>= 补充运力单价 × 接单里程 × 百台车月事故 / 100</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">维修</span><span>= 百台车月故障 × 工时 × 工时成本 / 100</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">采图制图</span><span>= 参数中的采图制图月度额</span></div>
+                        <div className="col-span-2 text-[11px] font-semibold text-gray-500 mb-1 mt-2">运营固定月成本</div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">仓储</span><span>= 单车仓储固定额（平台）</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">地勤人员</span><span>= 地勤成本 / 地勤人车比 × (1+排班冗余)</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">路线部署</span><span>= 路线部署月度摊销（参数）</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">维护</span><span>= 其他固定维护（参数，默认 0）</span></div>
+                        <div className="col-span-2 text-[11px] font-semibold text-gray-500 mb-1 mt-2">资产侧</div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">{isLease ? "折旧成本" : "租赁成本"}</span><span>= 硬件成本 {isLease ? "× 折旧残值率 / 折旧年限 / 12" : "× (1+IRR) / 5 / 12"}</span></div>
+                        <div className="flex gap-2"><span className="text-gray-400 shrink-0 w-24 text-right">单车毛利</span><span>= 单车收入 - 单车成本（含上列变动+固定+资产）</span></div>
                       </>
                     )}
                   </div>
