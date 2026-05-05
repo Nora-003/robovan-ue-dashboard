@@ -335,32 +335,42 @@
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'stretch', height: '100%', position: 'relative', zIndex: 2 }}>
             {data.map((d, i) => (
-              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3, height: '100%', position: 'relative' }}>
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0, minHeight: 0 }}>
+                <div style={{ flex: 1, width: '100%', position: 'relative', minHeight: 0 }}>
                   {bars.map(b => {
                     const val = d[b.key];
-                    const isNeg = val < 0;
-                    const pct = symmetric
-                      ? (Math.abs(val) / (maxTick * 2)) * 100
-                      : (Math.abs(val) / span) * 100;
-                    const bottomPos = symmetric ? '50%' : `${100 - zeroLineFromTop}%`;
-                    const topPos = symmetric ? '50%' : `${zeroLineFromTop}%`;
+                    /** 数值 v 对应的上边缘位置（距图表区域顶部 %）；顶为 rangeMax，底为 rangeMin */
+                    const valueToPctFromTop = (v) => ((rangeMax - v) / span) * 100;
+                    const pVal = valueToPctFromTop(val);
+                    const pZero = valueToPctFromTop(0);
+                    const topEdgePct = Math.min(pVal, pZero);
+                    const barHeightPct = Math.abs(pVal - pZero);
                     const barColor = d.color || b.color;
                     const tipText = `${d.name || ""}${d.name ? " · " : ""}${b.name}: ${tooltipFormat(val)}`;
+                    const growUp = val >= 0;
                     return (
                       <div
                         key={b.key}
                         style={{ position: 'relative', width: 28, height: '100%', cursor: 'default' }}
                         onMouseEnter={(e) => setBarTip({ x: e.clientX, y: e.clientY, text: tipText })}
                         onMouseMove={(e) => setBarTip((t) => (t ? { ...t, x: e.clientX, y: e.clientY } : null))}
-                        onMouseLeave={() => setBarTip(null)}
                       >
-                        <div style={{ position: 'absolute', left: 0, right: 0, [isNeg ? 'top' : 'bottom']: symmetric ? '50%' : (isNeg ? topPos : bottomPos), height: `${pct}%`, backgroundColor: barColor, borderRadius: isNeg ? '0 0 3px 3px' : '3px 3px 0 0' }} />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            right: 0,
+                            top: `${topEdgePct}%`,
+                            height: `${barHeightPct}%`,
+                            backgroundColor: barColor,
+                            borderRadius: growUp ? '3px 3px 0 0' : '0 0 3px 3px',
+                          }}
+                        />
                       </div>
                     );
                   })}
                 </div>
-                <div style={{ fontSize: 11, color: '#475569', marginTop: 6, height: 20, whiteSpace: 'nowrap' }}>{d.name || d.month}</div>
+                <div style={{ fontSize: 11, color: '#475569', marginTop: 6, height: 20, flexShrink: 0, whiteSpace: 'nowrap' }}>{d.name || d.month}</div>
               </div>
             ))}
           </div>
