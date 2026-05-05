@@ -471,7 +471,7 @@
                 <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
                 <div className="flex-1 flex justify-between items-center min-w-0">
                   <span className="text-xs text-gray-600 truncate" title={item.explanation}>
-                    {isTop5 && <span className="text-red-600 font-semibold mr-1">第{rank}名</span>}
+                    {rank === 1 && <span className="text-red-600 font-semibold mr-1">占比最高 · </span>}
                     {item.name}
                   </span>
                   <span className="text-xs font-medium text-gray-900 ml-2">{formatNum(item.value)}</span>
@@ -537,6 +537,9 @@
           <h3 className="text-sm font-semibold text-gray-900 mb-1">{current.month} 成本明细（单车）</h3>
           <p className="mb-2 text-[10px] leading-snug text-gray-500">
             {isSale ? "累计运营各分项之和应等于「累计运营」；总成本 = 硬件 + max(累计运营, 预计负债)。" : "资产侧 · 运营变动成本 · 运营固定月成本 — 与左图同色同序"}
+            <span className="block mt-1.5 text-gray-600">
+              <strong className="text-red-600">红色加粗</strong>的占比为相对<strong className="text-gray-700">单车成本合计</strong>最高的五项成本（由高到低），便于识别<strong className="text-gray-700">成本结构里哪些科目占比高</strong>。
+            </span>
           </p>
           {breakdownRows}
         </div>
