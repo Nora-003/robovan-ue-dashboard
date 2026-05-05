@@ -264,6 +264,7 @@
   }
 
   function CustomBarChart({ data, bars, height = 300, symmetric = true, yFormat = (v) => (v/10000).toFixed(0), tooltipFormat = formatWan }) {
+    const [barTip, setBarTip] = useState(null);
     const allValues = data.flatMap(d => bars.map(b => d[b.key]));
     const minVal = Math.min(...allValues);
     const maxVal = Math.max(...allValues);
@@ -272,6 +273,7 @@
     const maxTick = Math.max(Math.ceil(maxAbs / digits) * digits, digits);
 
     let rangeMin, rangeMax, tickCount, step;
+    let mixedSignNonSym = false;
     if (symmetric) {
       rangeMin = -maxTick; rangeMax = maxTick;
       tickCount = 9; step = maxTick / 4;
@@ -284,8 +286,10 @@
         rangeMin = -maxTick; rangeMax = 0;
       } else {
         rangeMin = -maxTick; rangeMax = maxTick;
+        mixedSignNonSym = true;
       }
-      tickCount = 6;
+      /** 同时含正负时须用奇数刻度，使中点恰好为 0（偶数等分会跳过 0） */
+      tickCount = mixedSignNonSym ? 7 : 6;
       step = null;
     }
 
@@ -304,15 +308,26 @@
     }
 
     const lineTopPct = (i) => (tickCount > 1 ? i / (tickCount - 1) : 0) * 100;
+    const tickNearZero = (tv) => Math.abs(tv) <= Math.max(span * 1e-9, 0.01);
     const isZeroGridLine = (i) => {
       if (symmetric) return i === Math.floor((tickCount - 1) / 2);
+      if (tickNearZero(ticks[i])) return true;
       return Math.abs(lineTopPct(i) - zeroLineFromTop) < 2.5;
     };
 
+    const useSeriesLegend = bars.length === 1 && data.length > 0 && data.every((d) => d.color);
+
     return (
-      <div style={{ height, position: 'relative', paddingLeft: 52, paddingBottom: 32 }}>
+      <div
+        style={{ height, position: 'relative', paddingLeft: 52, paddingBottom: 32 }}
+        onMouseLeave={() => setBarTip(null)}
+      >
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 32, width: 48, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', fontSize: 11, color: '#64748b', textAlign: 'right' }}>
-          {ticks.map((val, i) => <span key={i}>{yFormat(val)}</span>)}
+          {ticks.map((val, i) => (
+            <span key={i} style={{ color: tickNearZero(val) ? '#475569' : undefined, fontWeight: tickNearZero(val) ? 600 : undefined }}>
+              {yFormat(val)}
+            </span>
+          ))}
         </div>
         <div style={{ position: 'relative', height: 'calc(100% - 32px)' }}>
           {ticks.map((_, i) => (
@@ -331,8 +346,15 @@
                     const bottomPos = symmetric ? '50%' : `${100 - zeroLineFromTop}%`;
                     const topPos = symmetric ? '50%' : `${zeroLineFromTop}%`;
                     const barColor = d.color || b.color;
+                    const tipText = `${d.name || ""}${d.name ? " · " : ""}${b.name}: ${tooltipFormat(val)}`;
                     return (
-                      <div key={b.key} title={`${b.name}: ${tooltipFormat(val)}`} style={{ position: 'relative', width: 28, height: '100%' }}>
+                      <div
+                        key={b.key}
+                        style={{ position: 'relative', width: 28, height: '100%', cursor: 'default' }}
+                        onMouseEnter={(e) => setBarTip({ x: e.clientX, y: e.clientY, text: tipText })}
+                        onMouseMove={(e) => setBarTip((t) => (t ? { ...t, x: e.clientX, y: e.clientY } : null))}
+                        onMouseLeave={() => setBarTip(null)}
+                      >
                         <div style={{ position: 'absolute', left: 0, right: 0, [isNeg ? 'top' : 'bottom']: symmetric ? '50%' : (isNeg ? topPos : bottomPos), height: `${pct}%`, backgroundColor: barColor, borderRadius: isNeg ? '0 0 3px 3px' : '3px 3px 0 0' }} />
                       </div>
                     );
@@ -343,13 +365,40 @@
             ))}
           </div>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, paddingTop: 8, fontSize: 12 }}>
-          {bars.map(b => (
-            <span key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 12, height: 12, backgroundColor: b.color, borderRadius: 2, display: 'inline-block' }} />
-              {b.name}
-            </span>
-          ))}
+        {barTip && (
+          <div
+            style={{
+              position: 'fixed',
+              left: barTip.x + 12,
+              top: barTip.y + 12,
+              zIndex: 9999,
+              pointerEvents: 'none',
+              background: 'rgba(15, 23, 42, 0.92)',
+              color: '#f8fafc',
+              fontSize: 12,
+              padding: '6px 10px',
+              borderRadius: 6,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              maxWidth: 220,
+            }}
+          >
+            {barTip.text}
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 16, paddingTop: 8, fontSize: 12, flexWrap: 'wrap' }}>
+          {useSeriesLegend
+            ? data.map((d) => (
+                <span key={d.name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 12, height: 12, backgroundColor: d.color, borderRadius: 2, display: 'inline-block' }} />
+                  {d.name}
+                </span>
+              ))
+            : bars.map(b => (
+                <span key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 12, height: 12, backgroundColor: b.color, borderRadius: 2, display: 'inline-block' }} />
+                  {b.name}
+                </span>
+              ))}
         </div>
       </div>
     );
