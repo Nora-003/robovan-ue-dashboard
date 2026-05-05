@@ -271,28 +271,43 @@
     const digits = Math.pow(10, Math.floor(Math.log10(maxAbs)));
     const maxTick = Math.max(Math.ceil(maxAbs / digits) * digits, digits);
 
-    let rangeMin, rangeMax, zeroPct, tickCount, step;
+    let rangeMin, rangeMax, tickCount, step;
     if (symmetric) {
       rangeMin = -maxTick; rangeMax = maxTick;
-      zeroPct = 50;
       tickCount = 9; step = maxTick / 4;
     } else {
       const allNonNeg = minVal >= 0;
       const allNonPos = maxVal <= 0;
       if (allNonNeg) {
         rangeMin = 0; rangeMax = maxTick;
-        zeroPct = 100;
       } else if (allNonPos) {
         rangeMin = -maxTick; rangeMax = 0;
-        zeroPct = 0;
       } else {
         rangeMin = -maxTick; rangeMax = maxTick;
-        zeroPct = (maxTick / (maxTick * 2)) * 100;
       }
-      tickCount = 6; step = maxTick / 5;
+      tickCount = 6;
+      step = null;
     }
 
-    const ticks = Array.from({ length: tickCount }).map((_, i) => rangeMax - i * step);
+    const span = Math.max(rangeMax - rangeMin, 1e-12);
+    /** 数值 0 在纵轴上的位置（从顶部算起的百分比），与刻度线性一致 */
+    const zeroLineFromTop = ((rangeMax - 0) / span) * 100;
+
+    let ticks;
+    if (symmetric) {
+      ticks = Array.from({ length: tickCount }).map((_, i) => rangeMax - i * step);
+    } else {
+      ticks = Array.from({ length: tickCount }).map((_, i) => {
+        const r = tickCount > 1 ? i / (tickCount - 1) : 0;
+        return rangeMax - r * span;
+      });
+    }
+
+    const lineTopPct = (i) => (tickCount > 1 ? i / (tickCount - 1) : 0) * 100;
+    const isZeroGridLine = (i) => {
+      if (symmetric) return i === Math.floor((tickCount - 1) / 2);
+      return Math.abs(lineTopPct(i) - zeroLineFromTop) < 2.5;
+    };
 
     return (
       <div style={{ height, position: 'relative', paddingLeft: 52, paddingBottom: 32 }}>
@@ -301,7 +316,7 @@
         </div>
         <div style={{ position: 'relative', height: 'calc(100% - 32px)' }}>
           {ticks.map((_, i) => (
-            <div key={i} style={{ position: 'absolute', left: 0, right: 0, top: `${(i / (tickCount - 1)) * 100}%`, borderTop: (symmetric && i === Math.floor((tickCount - 1) / 2)) || (!symmetric && ((zeroPct === 100 && i === tickCount - 1) || (zeroPct === 0 && i === 0) || (zeroPct > 0 && zeroPct < 100 && Math.abs(i / (tickCount - 1) * 100 - zeroPct) < 2))) ? '1px solid #94a3b8' : '1px dashed #e2e8f0', zIndex: 1 }} />
+            <div key={i} style={{ position: 'absolute', left: 0, right: 0, top: `${lineTopPct(i)}%`, borderTop: isZeroGridLine(i) ? '1px solid #94a3b8' : '1px dashed #e2e8f0', zIndex: 1 }} />
           ))}
           <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'stretch', height: '100%', position: 'relative', zIndex: 2 }}>
             {data.map((d, i) => (
@@ -312,9 +327,9 @@
                     const isNeg = val < 0;
                     const pct = symmetric
                       ? (Math.abs(val) / (maxTick * 2)) * 100
-                      : (Math.abs(val) / (rangeMax - rangeMin)) * 100;
-                    const bottomPos = symmetric ? '50%' : `${100 - zeroPct}%`;
-                    const topPos = symmetric ? '50%' : `${zeroPct}%`;
+                      : (Math.abs(val) / span) * 100;
+                    const bottomPos = symmetric ? '50%' : `${100 - zeroLineFromTop}%`;
+                    const topPos = symmetric ? '50%' : `${zeroLineFromTop}%`;
                     const barColor = d.color || b.color;
                     return (
                       <div key={b.key} title={`${b.name}: ${tooltipFormat(val)}`} style={{ position: 'relative', width: 28, height: '100%' }}>
