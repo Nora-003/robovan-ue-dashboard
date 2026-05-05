@@ -30,6 +30,7 @@
   const ACCESS_HASH_HEX = "4e846d293248b6cc0d9e2c7f6371442ef0057430eddbbf5e206916db6ed985e4";
   /** 含路径与版本，避免与 github.io 其他项目冲突；升级版本可一次性清空旧会话 */
   const SESSION_KEY = "robovan-ue-auth-v2:" + (typeof location !== "undefined" ? (location.pathname.replace(/\/+$/, "") || "/") : "/");
+  const PARAMS_PANEL_KEY = "robovan-ue-params-panel-open";
 
   function readSessionAuthed() {
     try {
@@ -570,6 +571,19 @@
     const [selectedMonth, setSelectedMonth] = useState(7);
     const [viewMode, setViewMode] = useState("perVehicle");
     const [collapsedGroups, setCollapsedGroups] = useState({});
+    const [paramsPanelOpen, setParamsPanelOpen] = useState(() => {
+      try {
+        const v = localStorage.getItem(PARAMS_PANEL_KEY);
+        if (v === "0") return false;
+      } catch (_) {}
+      return true;
+    });
+
+    useEffect(() => {
+      try {
+        localStorage.setItem(PARAMS_PANEL_KEY, paramsPanelOpen ? "1" : "0");
+      } catch (_) {}
+    }, [paramsPanelOpen]);
 
     useEffect(() => {
       const hash = window.location.hash;
@@ -699,6 +713,16 @@
             <p className="text-xs text-gray-500">三模式对比 · 运营变动/固定/资产分项 · 修改参数实时联动</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setParamsPanelOpen((o) => !o)}
+              className={`px-3 py-1 text-xs rounded-md border transition shrink-0 ${paramsPanelOpen ? "border-gray-200 bg-white text-gray-700 hover:bg-gray-50" : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"}`}
+              aria-expanded={paramsPanelOpen}
+              aria-controls="ue-params-sidebar"
+              title={paramsPanelOpen ? "收起左侧调参区，专注看图" : "展开调参"}
+            >
+              {paramsPanelOpen ? "隐藏调参" : "显示调参"}
+            </button>
             <div className="flex bg-gray-100 rounded-lg p-1">
               <button onClick={() => setActiveTab("monthly")} className={`px-3 py-1 text-xs rounded-md transition ${activeTab === "monthly" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>月度分析</button>
               <button onClick={() => setActiveTab("annual")} className={`px-3 py-1 text-xs rounded-md transition ${activeTab === "annual" ? "bg-white shadow text-gray-900" : "text-gray-500"}`}>年度对比</button>
@@ -730,9 +754,28 @@
           </div>
         </header>
 
+        {!paramsPanelOpen && activeTab === "monthly" && (
+          <div className="bg-white border-b border-gray-200 px-4 py-2 lg:px-6 flex flex-wrap items-center gap-2 shadow-sm">
+            <span className="text-xs font-semibold text-gray-600 shrink-0">聚焦月份</span>
+            <div className="flex gap-1 flex-wrap">
+              {MONTHS.map((m, i) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setSelectedMonth(i)}
+                  className={`px-2 py-1 text-xs rounded border transition ${selectedMonth === i ? "bg-blue-600 text-white border-blue-600" : "bg-gray-50 text-gray-600 border-gray-200 hover:border-blue-400"}`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col lg:flex-row">
           {/* Left Sidebar */}
-          <aside className="w-full lg:w-80 bg-white border-r border-gray-200 lg:h-[calc(100vh-60px)] overflow-y-auto p-4">
+          {paramsPanelOpen && (
+          <aside id="ue-params-sidebar" className="w-full lg:w-80 shrink-0 bg-white border-r border-gray-200 lg:h-[calc(100vh-60px)] overflow-y-auto p-4">
             <div className="mb-4">
               <label className="text-xs font-semibold text-gray-700">聚焦月份</label>
               <div className="flex gap-1 mt-2 flex-wrap">
@@ -803,6 +846,7 @@
               <NumInput label="保险（月，免赔另见事故/赔偿）" value={params.insurance} onChange={(v) => updateParam("insurance", v)} />
             </InputGroup>
           </aside>
+          )}
 
           {/* Main Content */}
           <main className="flex-1 p-4 lg:p-6 overflow-y-auto lg:h-[calc(100vh-60px)]">
