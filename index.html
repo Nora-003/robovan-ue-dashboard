@@ -203,25 +203,61 @@
     });
   }
 
+  /** 卖车模式：单月运营分项（与原先 monthlyOp 内公式一致） */
+  function computeSaleOperatingMonth(p, monthIdx) {
+    const i = monthIdx;
+    const cumulative = p.saleDeliveries.slice(0, i + 1).reduce((a, b) => a + b, 0);
+    const rr = p.remoteRatio[i];
+    const remote = p.remoteCost / rr * (1 + p.shiftRedundancy);
+    const cs = p.csCost / p.csRatio * (1 + p.shiftRedundancy);
+    const ground = p.groundCost / p.groundRatio * (1 + p.shiftRedundancy);
+    const monthlyAccidents = cumulative / 100 * p.accidents[i];
+    const riskTotal = p.compensation * monthlyAccidents * p.riskProb;
+    const riskPv = cumulative > 0 ? riskTotal / cumulative : 0;
+    const dailyOrders = (p.orderMileage + p.emptyMileage) / p.mpir[i];
+    const bwPv = p.streamBandwidth * p.bandwidthCostPerG / rr;
+    const cloudPv = dailyOrders * p.workOrderDuration * p.bandwidthConsumption * p.egressCost * 30 + bwPv;
+    const backup = p.backupPrice * p.orderMileage * p.accidents[i] / 100;
+    const repair = p.faults * p.repairHours * p.laborCost / 100;
+    const charging = 0;
+    const insurance = p.insurance;
+    const traffic = p.trafficCost[i];
+    const mapping = p.mappingCost[i];
+    const variable = remote + cs + insurance + riskPv + traffic + cloudPv + backup + repair + mapping;
+    const fixed = ground + p.routeDeploy + p.maintenance;
+    return {
+      charging, remote, cs, insurance, risk: riskPv, traffic, cloud: cloudPv, backup, repair, mapping,
+      warehouse: 0, ground, routeDeploy: p.routeDeploy, maintenance: p.maintenance,
+      variableCost: variable, fixedCost: fixed, monthlyOperating: variable + fixed,
+    };
+  }
+
+  /** 聚焦月起至12月的累计运营分项（应与 suffix 累计运营一致） */
+  function sumSaleOperatingFromMonth(p, fromIdx) {
+    const z = { charging: 0, remote: 0, cs: 0, insurance: 0, risk: 0, traffic: 0, cloud: 0, backup: 0, repair: 0, mapping: 0, warehouse: 0, ground: 0, routeDeploy: 0, maintenance: 0 };
+    for (let j = fromIdx; j < 8; j++) {
+      const m = computeSaleOperatingMonth(p, j);
+      z.charging += m.charging;
+      z.remote += m.remote;
+      z.cs += m.cs;
+      z.insurance += m.insurance;
+      z.risk += m.risk;
+      z.traffic += m.traffic;
+      z.cloud += m.cloud;
+      z.backup += m.backup;
+      z.repair += m.repair;
+      z.mapping += m.mapping;
+      z.warehouse += m.warehouse;
+      z.ground += m.ground;
+      z.routeDeploy += m.routeDeploy;
+      z.maintenance += m.maintenance;
+    }
+    return z;
+  }
+
   function computeSale(p) {
-    const monthlyOp = MONTHS.map((_, i) => {
-      const cumulative = p.saleDeliveries.slice(0, i + 1).reduce((a, b) => a + b, 0);
-      const rr = p.remoteRatio[i];
-      const remote = p.remoteCost / rr * (1 + p.shiftRedundancy);
-      const cs = p.csCost / p.csRatio * (1 + p.shiftRedundancy);
-      const ground = p.groundCost / p.groundRatio * (1 + p.shiftRedundancy);
-      const monthlyAccidents = cumulative / 100 * p.accidents[i];
-      const riskTotal = p.compensation * monthlyAccidents * p.riskProb;
-      const riskPv = cumulative > 0 ? riskTotal / cumulative : 0;
-      const dailyOrders = (p.orderMileage + p.emptyMileage) / p.mpir[i];
-      const bwPv = p.streamBandwidth * p.bandwidthCostPerG / rr;
-      const cloudPv = dailyOrders * p.workOrderDuration * p.bandwidthConsumption * p.egressCost * 30 + bwPv;
-      const backup = p.backupPrice * p.orderMileage * p.accidents[i] / 100;
-      const repair = p.faults * p.repairHours * p.laborCost / 100;
-      const variable = remote + cs + p.insurance + riskPv + p.trafficCost[i] + cloudPv + backup + repair + p.mappingCost[i];
-      const fixed = ground + p.routeDeploy + p.maintenance;
-      return variable + fixed;
-    });
+    const monthlyDetails = MONTHS.map((_, i) => computeSaleOperatingMonth(p, i));
+    const monthlyOp = monthlyDetails.map((d) => d.monthlyOperating);
     const suffix = []; let s = 0;
     for (let i = 7; i >= 0; i--) { s += monthlyOp[i]; suffix[i] = s; }
     return MONTHS.map((_, i) => {
@@ -232,7 +268,54 @@
       const costPerVehicle = hw + Math.max(cumOp, provision);
       const revenue = p.salePrice;
       const gp = revenue - costPerVehicle;
-      return { month: MONTHS[i], vehicleCount: deliveries, cumulative: p.saleDeliveries.slice(0, i + 1).reduce((a, b) => a + b, 0), revenue, unitLease: 0, charging: 0, remote: 0, cs: 0, insurance: 0, risk: 0, traffic: 0, cloud: 0, backup: 0, repair: 0, mapping: 0, variableCost: 0, warehouse: 0, ground: 0, routeDeploy: 0, maintenance: 0, fixedCost: 0, operatingCost: cumOp, totalCost: costPerVehicle, grossProfit: gp, grossMargin: revenue > 0 ? (gp / revenue) * 100 : 0, revenueTotal: revenue * deliveries, costTotal: costPerVehicle * deliveries, grossProfitTotal: gp * deliveries, provision, hardwareCost: hw };
+      const m = monthlyDetails[i];
+      const cum = sumSaleOperatingFromMonth(p, i);
+      return {
+        month: MONTHS[i],
+        vehicleCount: deliveries,
+        cumulative: p.saleDeliveries.slice(0, i + 1).reduce((a, b) => a + b, 0),
+        revenue,
+        unitLease: 0,
+        charging: m.charging,
+        remote: m.remote,
+        cs: m.cs,
+        insurance: m.insurance,
+        risk: m.risk,
+        traffic: m.traffic,
+        cloud: m.cloud,
+        backup: m.backup,
+        repair: m.repair,
+        mapping: m.mapping,
+        variableCost: m.variableCost,
+        warehouse: m.warehouse,
+        ground: m.ground,
+        routeDeploy: m.routeDeploy,
+        maintenance: m.maintenance,
+        fixedCost: m.fixedCost,
+        cumRemote: cum.remote,
+        cumCs: cum.cs,
+        cumInsurance: cum.insurance,
+        cumRisk: cum.risk,
+        cumTraffic: cum.traffic,
+        cumCloud: cum.cloud,
+        cumBackup: cum.backup,
+        cumRepair: cum.repair,
+        cumMapping: cum.mapping,
+        cumWarehouse: cum.warehouse,
+        cumGround: cum.ground,
+        cumRouteDeploy: cum.routeDeploy,
+        cumMaintenance: cum.maintenance,
+        cumCharging: cum.charging,
+        operatingCost: cumOp,
+        provision,
+        hardwareCost: hw,
+        totalCost: costPerVehicle,
+        grossProfit: gp,
+        grossMargin: revenue > 0 ? (gp / revenue) * 100 : 0,
+        revenueTotal: revenue * deliveries,
+        costTotal: costPerVehicle * deliveries,
+        grossProfitTotal: gp * deliveries,
+      };
     });
   }
 
@@ -310,8 +393,9 @@
   function formatNum(n) { return n === undefined || n === null ? "-" : n.toLocaleString("zh-CN", { maximumFractionDigits: 1 }); }
   function formatWan(n) { return (n / 10000).toFixed(2) + "万"; }
 
-  /** 月度堆叠柱：数据字段名与 chartData 一致；自下而上堆叠顺序 */
+  /** 月度堆叠柱：数据字段名与 chartData 一致；自下而上堆叠顺序（卖车用硬件成本，平台/租赁用租赁成本） */
   const MONTHLY_COST_STACK_SERIES = [
+    { dataKey: "硬件成本", name: "硬件", fill: "#991b1b" },
     { dataKey: "租赁成本", name: "租赁/折旧", fill: "#dc2626" },
     { dataKey: "充电", name: "充电", fill: "#ca8a04" },
     { dataKey: "远驾安全员", name: "远驾安全员", fill: "#ea580c" },
@@ -375,40 +459,18 @@
       </>
     );
 
-    if (isSale) {
-      return (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6 mb-5">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">单车成本结构（卖车模式）</h3>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(val) => formatNum(val)} contentStyle={{ fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="单车收入" fill="#10b981" isAnimationActive={false} />
-                <Bar dataKey="单车成本" fill="#ef4444" isAnimationActive={false} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">{current.month} 成本明细（单车）</h3>
-            {breakdownRows}
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6 mb-5">
-        <div className="rounded-xl border border-blue-200 bg-white p-4 shadow-sm ring-1 ring-blue-100">
+        <div className={`rounded-xl border bg-white p-4 shadow-sm ring-1 ${isSale ? "border-amber-200 ring-amber-100" : "border-blue-200 ring-blue-100"}`}>
           <h3 className="text-sm font-semibold text-gray-900 mb-1">
-            单车成本结构趋势（元/车/月）
-            <span className="ml-2 inline-block rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">分项版</span>
+            {isSale ? "卖车 · 成本结构趋势（元/车/月）" : "单车成本结构趋势（元/车/月）"}
+            {!isSale && <span className="ml-2 inline-block rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">分项版</span>}
+            {isSale && <span className="ml-2 inline-block rounded-md bg-amber-600 px-2 py-0.5 text-[10px] font-semibold text-white">含硬件</span>}
           </h3>
           <p className="mb-3 text-[10px] leading-relaxed text-gray-500">
-            自下而上：租赁/折旧 → 运营变动（充电、远驾、客服、保险、风险、流量、云、补充运力、维修、采图）→ 运营固定（仓储、地勤、路线、维护）。与右侧逐项对齐。
+            {isSale
+              ? "堆叠含义：每月柱内为「当月」单车运营分项 + 当月硬件；右侧明细为聚焦月至12月的累计运营分项及预计负债孰高口径。"
+              : "自下而上：硬件（仅卖车有值）→ 租赁/折旧 → 运营变动 → 运营固定。与右侧逐项对齐。"}
           </p>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={chartData} margin={{ top: 4, right: 8, left: 4, bottom: 8 }}>
@@ -423,9 +485,11 @@
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div className="rounded-xl border border-indigo-200 bg-white p-4 shadow-sm ring-1 ring-indigo-100">
+        <div className={`rounded-xl border bg-white p-4 shadow-sm ring-1 ${isSale ? "border-amber-200 ring-amber-100" : "border-indigo-200 ring-indigo-100"}`}>
           <h3 className="text-sm font-semibold text-gray-900 mb-1">{current.month} 成本明细（单车）</h3>
-          <p className="mb-2 text-[10px] leading-snug text-gray-500">资产侧 · 运营变动成本 · 运营固定月成本 — 与左图同色同序</p>
+          <p className="mb-2 text-[10px] leading-snug text-gray-500">
+            {isSale ? "累计运营各分项之和应等于「累计运营」；总成本 = 硬件 + max(累计运营, 预计负债)。" : "资产侧 · 运营变动成本 · 运营固定月成本 — 与左图同色同序"}
+          </p>
           {breakdownRows}
         </div>
       </div>
@@ -542,7 +606,8 @@
 
     const chartData = allData.map((d) => ({
       month: d.month, 车辆数: d.vehicleCount,
-      租赁成本: Math.round(d.unitLease),
+      硬件成本: Math.round(isSale ? (d.hardwareCost || 0) : 0),
+      租赁成本: Math.round(isSale ? 0 : d.unitLease),
       仓储: Math.round(d.warehouse), 地勤: Math.round(d.ground), 路线部署: Math.round(d.routeDeploy), 维护: Math.round(d.maintenance),
       充电: Math.round(d.charging), 远驾安全员: Math.round(d.remote), 客服: Math.round(d.cs), 保险: Math.round(d.insurance),
       风险赔偿: Math.round(d.risk), 流量: Math.round(d.traffic), 云服务: Math.round(d.cloud), 补充运力: Math.round(d.backup), 维修: Math.round(d.repair), 采图制图: Math.round(d.mapping),
@@ -552,8 +617,28 @@
 
     const costBreakdown = isSale
       ? [
-          { name: "硬件成本", value: current.hardwareCost || 0, color: "#ef4444", explanation: "当月单车硬件采购成本", section: "asset" },
-          { name: "预计负债/运营", value: current.totalCost - (current.hardwareCost || 0), color: "#f97316", explanation: "累计运营至年底成本 与 预计负债(售价×预计负债比例) 取孰高值", section: "asset" },
+          { sectionTitle: "资产侧（单车）", section: "hdr" },
+          { name: "硬件成本", value: current.hardwareCost || 0, color: "#991b1b", explanation: "当月交付对应硬件成本", section: "asset" },
+          { sectionTitle: `累计运营分项（${current.month}→12月，合计=${formatNum(current.operatingCost)}）`, section: "hdr" },
+          { name: "充电", value: current.cumCharging || 0, color: "#ca8a04", explanation: "各月充电累计（卖车当前为 0）", section: "cum" },
+          { name: "远驾安全员", value: current.cumRemote, color: "#ea580c", explanation: "聚焦月起累计", section: "cum" },
+          { name: "客服", value: current.cumCs, color: "#0d9488", explanation: "聚焦月起累计", section: "cum" },
+          { name: "保险", value: current.cumInsurance, color: "#0284c7", explanation: "各月保费合计（参数为单月）", section: "cum" },
+          { name: "风险赔偿", value: current.cumRisk, color: "#b91c1c", explanation: "聚焦月起累计", section: "cum" },
+          { name: "流量", value: current.cumTraffic, color: "#65a30d", explanation: "聚焦月起累计", section: "cum" },
+          { name: "云服务", value: current.cumCloud, color: "#7c3aed", explanation: "聚焦月起累计", section: "cum" },
+          { name: "补充运力", value: current.cumBackup, color: "#db2777", explanation: "聚焦月起累计", section: "cum" },
+          { name: "维修", value: current.cumRepair, color: "#be185d", explanation: "聚焦月起累计", section: "cum" },
+          { name: "采图制图", value: current.cumMapping, color: "#475569", explanation: "聚焦月起累计", section: "cum" },
+          { name: "仓储", value: current.cumWarehouse, color: "#78716c", explanation: "聚焦月起累计", section: "cum" },
+          { name: "地勤人员", value: current.cumGround, color: "#b45309", explanation: "聚焦月起累计", section: "cum" },
+          { name: "路线部署", value: current.cumRouteDeploy, color: "#57534e", explanation: "聚焦月起累计", section: "cum" },
+          { name: "维护", value: current.cumMaintenance, color: "#a8a29e", explanation: "聚焦月起累计", section: "cum" },
+          { sectionTitle: "预计负债与孰高口径", section: "hdr" },
+          { name: "预计负债（售价×比例）", value: current.provision, color: "#94a3b8", explanation: "会计估计参考值", section: "prov" },
+          ...(current.provision > current.operatingCost
+            ? [{ name: "预计负债附加（孰高）", value: current.provision - current.operatingCost, color: "#f97316", explanation: "当预计负债高于累计运营时，差额计入成本", section: "adj" }]
+            : []),
         ]
       : [
           { sectionTitle: "资产侧（单车）", section: "hdr" },
